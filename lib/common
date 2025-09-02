@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+trap print_stack ERR
+print_stack() {
+    echo "❌ Error occurred at line $LINENO in script $0. Stack trace:"
+    for i in "${!FUNCNAME[@]}"; do
+        [[ $i -eq 0 ]] && continue
+        echo "  at ${FUNCNAME[$i]}() in ${BASH_SOURCE[$i]}:${BASH_LINENO[$((i - 1))]}"
+    done
+}
+
+info() {
+  printf '%s %s\n' "[INFO]" "$*" >&2
+}
+
+warn() {
+  printf '%s %s\n' "[WARN]" "$*" >&2
+}
+
+error() {
+  printf '%s %s\n' "[ERROR]" "$*" >&2
+}
+
+die() {
+  error "$@"
+  exit 1
+}
+
+fr_log() {
+  while read -r line; do
+    echo "[FILTER_REPO] ${line}"
+  done
+
+#  printf '%s %s\n' "[FILTER_REPO]" "$*" >&2;
+}
+
+has_flag() {
+  local flag="$1"; shift
+
+  for arg in "$@"; do
+    [[ "${arg}" == "${flag}" ]] && return 0
+  done
+
+  return 1
+}
+
+is_git_repo() {
+  local repo_dir="$1"
+
+  test -d "${repo_dir}/.git" && return 0
+  [[ "$(git -C "${repo_dir}" rev-parse --is-bare-repository 2>&1)" == "true" ]] && return 0
+
+  return 1
+}
