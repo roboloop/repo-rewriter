@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+SCRIPT_DIR=$(CDPATH="" cd -- "$(dirname -- "$0")" && pwd)
+ROOT_DIR=$(CDPATH="" cd -- "${SCRIPT_DIR}/.." && pwd)
+. "${ROOT_DIR}/cmds/print_authors"
+. "${ROOT_DIR}/lib/common"
+
+rewrite_authors() {
+  [[ "$#" -lt 2 ]] && die "Usage: rewrite_authors <repo_dir> <mailmap_path>"
+  [[ ! -d "$1" ]] && die "'$1' is not a valid directory"
+  [[ ! -f "$2" ]] && die "'$2' is not a valid file path"
+
+  local repo_dir mailmap_path
+  repo_dir="$1"
+  mailmap_path="$2"
+  shift 2
+  is_git_repo "${repo_dir}" || die "'${repo_dir}' is not a git repository"
+
+  local list changed="" skipped=""
+  list="$(print_authors "${repo_dir}")"
+
+  local line regex old_name old_email new_name new_email
+  regex='([^<]*)<([^>]*)>([^<]*)<([^>]*)>'
+  while read -r line; do
+    # remove comments
+    line="$(sed -E 's/[[:space:]]*#.*//' <<< "${line}")"
+    # skip empty line
+    [[ "${line}" =~ ^[[:space:]]*$ ]] && continue
+
+    # extract and trim values
+    read -r new_name < <(sed -E -e "s/${regex}/\1/" <<< "${line}")
+    read -r new_email < <(sed -E -e "s/${regex}/\2/" <<< "${line}")
+    read -r old_name < <(sed -E -e "s/${regex}/\3/" <<< "${line}")
+    read -r old_email < <(sed -E -e "s/${regex}/\4/" <<< "${line}")
+
+    if grep -q "${old_name} <${old_email}>" <<< "${list}"; then
+      changed+="${old_name} <${old_email}>\t${new_name} <${new_email}>"$'\n'
+    else
+      skipped+="${old_name} <${old_email}>\t${new_name} <${new_email}>"$'\n'
+    fi
+  done < "${mailmap_path}"
+
+  if [[ -n "${skipped}" ]]; then
+    (
+      echo -e "Skipped:"
+      echo -e 'From\tTo\n'
+      echo -e "${skipped}"
+    ) | column -t -s $'\t' >&2
+  fi
+  if [[ -n "${changed}" ]]; then
+    (
+      echo -e "Changed:"
+      echo -e 'From\tTo\n'
+      echo -e "${changed}"
+    ) | column -t -s $'\t' >&2
+  else
+    echo "no emails will be changed" >&2 && exit 1
+  fi
+
+  git -C "${repo_dir}" filter-repo --force --mailmap "${mailmap_path}"
+}

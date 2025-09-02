@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+# Entry point to the all set of scripts
+#
+# Usage:
+#   ./rewriter <command> [arguments]
+#
+# The commands are:
+#   ./rewriter rewrite_timestamps <repo_dir>              normalize all commit's timestamps to UTC
+#   ./rewriter rewrite_authors <repo_dir> <mailmap>       normalize all commit's authors
+#   ./rewriter rewrite_history                            rebuild all history commit by commit
+#   ./rewriter show_authors <repo_dir>             print all authors
+#   ./rewriter make_backup <repo_dir>             make backup
+
+command -v git-filter-repo &> /dev/null || ( echo "git-filter-repo not found" >&2 && exit 1 )
+command -v column &> /dev/null || ( echo "column not found" >&2 && exit 1 )
+
+SCRIPT_DIR=$(CDPATH="" cd -- "$(dirname -- "$0")" && pwd)
+ROOT_DIR=$(CDPATH="" cd -- "${SCRIPT_DIR}/.." && pwd)
+
+[[ $# -lt 1 ]] && echo "No command passed" >&2 && exit 1
+cmd="$1"; shift
+commands="$(find "${ROOT_DIR}/cmds" -type f -print | sed -E 's|^.*/([^/]+)$|\1|')"
+! grep -Fxq "${cmd}" <<< "${commands}" && echo "Command '${cmd}' not found" && exit 1
+
+. "${ROOT_DIR}/cmds/${cmd}"
+"${cmd}" "$@"

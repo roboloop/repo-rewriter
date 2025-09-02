@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+SCRIPT_DIR=$(CDPATH="" cd -- "$(dirname -- "$0")" && pwd)
+ROOT_DIR=$(CDPATH="" cd -- "${SCRIPT_DIR}/.." && pwd)
+. "${ROOT_DIR}/cmds/print_authors"
+. "${ROOT_DIR}/lib/common"
+
+rewrite_timestamps() {
+  local repo_dir
+  repo_dir="$1"; shift
+  repo_dir=$(realpath "${repo_dir}")
+  is_git_repo "${repo_dir}"
+
+  local python_code
+  python_code="$(cat <<EOF
+    timestamp_str, _ = commit.author_date.split()
+    commit.author_date = timestamp_str + b" +0000"
+    timestamp_str, _ = commit.committer_date.split()
+    commit.committer_date = timestamp_str + b" +0000"
+EOF
+)"
+
+  info "Making changes of repo: ${repo_dir}"
+
+  git -C "${repo_dir}" filter-repo --force --commit-callback "${python_code}"
+
+  info "Check the result ${repo_dir}"
+}

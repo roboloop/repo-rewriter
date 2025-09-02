@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+SCRIPT_DIR=$(CDPATH="" cd -- "$(dirname -- "$0")" && pwd)
+ROOT_DIR=$(CDPATH="" cd -- "${SCRIPT_DIR}/.." && pwd)
+. "${ROOT_DIR}/lib/common"
+. "${ROOT_DIR}/lib/copy"
+
+make_backup() {
+  [[ "$#" -lt 1 ]] && die "Usage: make_backup <repo_dir>"
+  [[ ! -d "$1" ]] && die "'$1' is not a valid directory"
+
+  local src_dir dst_dir
+  src_dir="$1"; shift
+  dst_dir="$(copy_dir "${src_dir}")"
+  make_copy "${src_dir}" "${dst_dir}" "$@"
+}

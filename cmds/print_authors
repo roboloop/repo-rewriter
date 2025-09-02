@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+SCRIPT_DIR=$(CDPATH="" cd -- "$(dirname -- "$0")" && pwd)
+ROOT_DIR=$(CDPATH="" cd -- "${SCRIPT_DIR}/.." && pwd)
+. "${ROOT_DIR}/lib/common"
+
+print_authors() {
+  [[ "$#" -lt 1 ]] && die "Usage: print_authors <repo_path>"
+  [[ ! -d "$1" ]] && die "'$1' is not a valid directory"
+
+  local repo_dir
+  repo_dir="$1"
+  repo_dir="$(realpath "${repo_dir}")"
+
+  is_git_repo "${repo_dir}" || die "'${repo_dir}' is not a git repository"
+
+  git -C "${repo_dir}" log --pretty=format:$'%an <%ae>\n%cn <%ce>' | sort -u
+}
