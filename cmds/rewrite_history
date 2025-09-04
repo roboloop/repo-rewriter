@@ -1,0 +1,377 @@
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+SCRIPT_DIR=$(CDPATH="" cd -- "$(dirname -- "$0")" && pwd)
+ROOT_DIR=$(CDPATH="" cd -- "${SCRIPT_DIR}/.." && pwd)
+. "${ROOT_DIR}/lib/common"
+
+REPO_DIR="${REPO_DIR:?REPO_DIR is not set}"
+REPO_REWRITER_DIR="${REPO_DIR}/.git/repo-rewriter"
+HISTORY_CONFIG="${REPO_REWRITER_DIR}/history_config"
+HISTORY_STATE="${REPO_REWRITER_DIR}/history_state"
+
+EXCLUDE_BEGINNING="###> repo-rewriter ###"
+EXCLUDE_ENDING="###< repo-rewriter ###"
+DUMMY_COMMIT="0000000000000000000000000000000000000000"
+
+# initial → picked ⇄ committed
+#            ⇅
+#          skipped
+STATE_INITIAL="initial"
+STATE_PICKED="picked"
+STATE_COMMITTED="committed"
+STATE_SKIPPED="skipped"
+
+if [[ -f "${HISTORY_CONFIG}" && -s "${HISTORY_CONFIG}" ]]; then
+  info "Loading configuration from '${HISTORY_CONFIG}'."
+  . "${HISTORY_CONFIG}"
+else
+  warn "Using default values for configuration."
+  ORIGINAL_ROOT="${ORIGINAL_ROOT:-}"
+  ORIGINAL_HEAD="${ORIGINAL_HEAD:-refs/heads/master}"
+  REWRITTEN_ROOT="${REWRITTEN_ROOT:-}"
+  REWRITTEN_HEAD="${REWRITTEN_HEAD:-refs/heads/rewritten}"
+fi
+
+GIT() {
+  git -C "${REPO_DIR}" "$@"
+}
+
+list_of_ignored() {
+  sanitize() {
+    grep -vE -e '^#' -e '^[[:space:]]*$' | sed -E -e 's|^\.?/||' -e 's|/+$||' -e 's|^|/|'
+  }
+
+  local excluded=
+  if [[ -f "${REPO_DIR}/.gitignore" ]]; then
+    excluded="$(sanitize < "${REPO_DIR}/.gitignore" | \
+      sed -E -e "s|^|${REPO_DIR}|" | \
+      xargs -I'{}' sh -c "test -d '{}' && echo '{}' || true" | \
+      sed -E -e "s|(.+)|-not -path '\1/*'|" | \
+      paste -s -d' ' -
+    )"
+  fi
+
+  local dir
+  while read -r gitignore; do
+    dir=$(dirname "${gitignore}")
+    sanitize < "${gitignore}" | xargs -I'{}' sh -c "echo ${dir#"${REPO_DIR}"}{}"
+  done < <(eval "find '${REPO_DIR}' -type f -name '.gitignore' ! -empty ${excluded}")
+}
+
+to_picked() {
+  local sha from #to="picked"
+  read -r sha from < "${HISTORY_STATE}"
+
+#  info "sha from: ${sha} ${from}."
+#  if ! [[ "${from}" == "init" || "${from}" == "committed" || "${from}" == "skipped" ]]; then
+#    test -z "${dry_run}" && die "Cannot switch from '${from}' to '${to}'."
+#  fi
+#  test ! "${from}" == "init" || "${from}" == "committed" || "${from}" == "skipped"
+  test "${from}" == "${STATE_INITIAL}" || test "${from}" == "${STATE_COMMITTED}" || test "${from}" == "${STATE_SKIPPED}"
+}
+
+to_committed() {
+  local sha from #to="committed"
+  read -r sha from < "${HISTORY_STATE}"
+  test "${from}" == "${STATE_PICKED}"
+}
+
+to_skipped() {
+  local sha from #to="skipped"
+  read -r sha from < "${HISTORY_STATE}"
+  test "${from}" == "${STATE_PICKED}"
+}
+
+pre_init() {
+  info "Checking if some uncommitted changes exist."
+  GIT diff-index --quiet HEAD || die "The index or working tree is dirty.."
+
+  info "Checking if history is not linear."
+  if [[ $(GIT rev-list --min-parents=2 "${ORIGINAL_HEAD}" | wc -l) -ne 0 ]]; then
+    die "History is not linear."
+  fi
+
+  info "Setting root repository if another is not specified."
+  if test -z "${ORIGINAL_ROOT}"; then
+    ORIGINAL_ROOT="$(GIT rev-list --max-parents=0 "${ORIGINAL_HEAD}")"
+  fi
+
+  info "Checking if they are part of the same history."
+  if ! GIT merge-base --is-ancestor "${ORIGINAL_ROOT}" "${ORIGINAL_HEAD}"; then
+    die "${ORIGINAL_ROOT} is not an ancestor of ${ORIGINAL_HEAD}."
+  fi
+
+  info "Checking if config/state files already exist."
+  if test -f "${HISTORY_CONFIG}" || test -f "${HISTORY_STATE}"; then
+    die "Rewritten process was already initiated."
+  fi
+}
+
+init() {
+  pre_init
+
+  info "Sanitizing the index initially."
+  GIT read-tree --empty
+
+  info "Creating a new root commit (must be dropped at the end of work)."
+  local tree_root
+  tree_root="$(GIT write-tree)"
+  REWRITTEN_ROOT="$(GIT_AUTHOR_NAME="Drop Me" \
+    GIT_AUTHOR_EMAIL=drop@me \
+    GIT_AUTHOR_DATE="Thu, 01 Jan 1970 00:00:00 +0000" \
+    GIT_COMMITTER_NAME="Drop Me" \
+    GIT_COMMITTER_EMAIL=drop@me \
+    GIT_COMMITTER_DATE="Thu, 01 Jan 1970 00:00:00 +0000" \
+    GIT commit-tree "${tree_root}" -m "Drop me at the end"
+  )"
+
+  info "Creating a reference to the root commit."
+  GIT update-ref "${REWRITTEN_HEAD}" "${REWRITTEN_ROOT}"
+
+  # Move HEAD to that commit
+  info "Moving HEAD to the root commit."
+  GIT symbolic-ref HEAD "${REWRITTEN_HEAD}"
+
+  info "Populating .git/info/exclude with originally ignored files."
+  (
+    echo "${EXCLUDE_BEGINNING}"
+    list_of_ignored
+    echo "${EXCLUDE_ENDING}"
+  ) >> "${REPO_DIR}/.git/info/exclude"
+
+  info "Removing all other files and empty folders in the working tree."
+  GIT ls-files --others --exclude-standard -z | xargs -0 -r -I{} rm -rf -- "${REPO_DIR}/{}"
+  find "${REPO_DIR}" -type d -empty -delete
+
+  info "Creating a folder for repo-rewriter tool if it does not exist."
+  mkdir -p "${REPO_REWRITER_DIR}"
+
+  info "Setting the initial state of the rewriting process."
+  echo "${DUMMY_COMMIT} ${STATE_INITIAL}" > "${HISTORY_STATE}"
+
+  info "Setting the configuration of the rewriting process."
+  (
+    echo "ORIGINAL_ROOT=${ORIGINAL_ROOT}"
+    echo "ORIGINAL_HEAD=${ORIGINAL_HEAD}"
+    echo "REWRITTEN_ROOT=${REWRITTEN_ROOT}"
+    echo "REWRITTEN_HEAD=${REWRITTEN_HEAD}"
+  ) > "${HISTORY_CONFIG}"
+
+  info "Initialization was successful. Run the 'next' command to work with the first commit."
+}
+
+pre_next() {
+  info "Checking if it is possible to pick the next commit."
+  if ! to_picked; then
+    die "Cannot pick the next commit. You have already picked the commit."
+  fi
+
+  info "Checking if the current HEAD refers to ${REWRITTEN_HEAD}."
+  local symbolic_ref
+  symbolic_ref="$(GIT symbolic-ref HEAD)"
+  if [[ "${symbolic_ref}" != "${REWRITTEN_HEAD}" ]]; then
+    die "The current HEAD is not ${symbolic_ref}."
+  fi
+
+  info "Checking if there are staged files present."
+  if ! GIT diff-index --cached --quiet HEAD; then
+    die "There are staged files."
+  fi
+
+  info "Checking if there are unstaged files present."
+  if ! GIT diff-files --quiet; then
+    die "There are unstaged files."
+  fi
+
+  info "Checking if there are untracked files present."
+  if GIT ls-files --others --exclude-standard | head -n1 | grep -q .; then
+    die "There are untracked files."
+  fi
+}
+
+next() {
+  pre_next
+
+  info "Reading the current state."
+  local sha state
+  read -r sha state < "${HISTORY_STATE}"
+
+  info "Checking if the end of history was reached."
+  local last
+  last="$(sed -En '$p' <(GIT rev-list --reverse "${ORIGINAL_HEAD}" "${ORIGINAL_ROOT}"))"
+  if [[ "${sha}" == "$last" ]]; then
+    die "End of history reached"
+  fi
+
+  info "Getting the next commit."
+  local next
+  next="$(sed -En "/^${sha}\$/{n;p;q;}" <(GIT rev-list --reverse "${ORIGINAL_HEAD}" "${ORIGINAL_ROOT}"))"
+  if [[ "${sha}" == "${DUMMY_COMMIT}" ]]; then
+    next="$(sed -n '1p;q' <(GIT rev-list --reverse "${ORIGINAL_HEAD}" "${ORIGINAL_ROOT}"))"
+  fi
+  info "The ${next} commit has taken."
+
+  info "Populating the working tree with changes from the picked commit."
+  local tmp
+  tmp="$(mktemp)"
+  GIT_INDEX_FILE="${tmp}" git -C "${REPO_DIR}" read-tree "${next}"
+  GIT_INDEX_FILE="${tmp}" git -C "${REPO_DIR}" checkout-index -a -f
+  rm -f "${tmp}"
+
+  info "Updating the rewriting state."
+  echo "${next} ${STATE_PICKED}" > "${HISTORY_STATE}"
+}
+
+pre_commit() {
+  info "Checking if it is possible to make a commit."
+  if ! to_committed; then
+    die "Cannot commit the changes."
+  fi
+
+  info "Checking if the current HEAD refers to ${REWRITTEN_HEAD}."
+  local symbolic_ref
+  symbolic_ref="$(GIT symbolic-ref HEAD)"
+  if [[ "${symbolic_ref}" != "${REWRITTEN_HEAD}" ]]; then
+    die "The current HEAD is not ${symbolic_ref}."
+  fi
+
+  info "Checking if there are staged files present."
+  if GIT diff-index --cached --quiet HEAD; then
+    die "Nothing to commit."
+  fi
+
+  info "Checking if there are untracked files present."
+  if GIT ls-files --others --exclude-standard | head -n1 | grep -q .; then
+    warn "There are some untracked files that will be not committed."
+  fi
+}
+
+commit() {
+  pre_commit
+
+  info "Reading the current state."
+  local sha state
+  read -r sha state < "${HISTORY_STATE}"
+
+  info "Creating a tree object from the current index."
+  local tree_sha
+  tree_sha="$(GIT write-tree)"
+
+  info "Extracting a parent commit of a new history."
+  local parent_sha
+  parent_sha="$(GIT rev-parse HEAD)"
+
+  info "Extracting all metadata from the original commit."
+  local format author_name author_email author_date committer_name committer_email committer_date message
+  format="%an%x00%ae%x00%aD%x00%cn%x00%ce%x00%cD%x00%B%x00"
+  exec 3< <(GIT rev-list -1 --format="${format}" "${sha}" | sed '1d')
+  IFS= read -r -d '' author_name <&3
+  IFS= read -r -d '' author_email <&3
+  IFS= read -r -d '' author_date <&3
+  IFS= read -r -d '' committer_name <&3
+  IFS= read -r -d '' committer_email <&3
+  IFS= read -r -d '' committer_date <&3
+  IFS= read -r -d '' message <&3
+  exec 3<&-
+
+  COMMIT_MESSAGE="${COMMIT_MESSAGE:-"${message}"}"
+
+  info "Creating a commit with all available metadata"
+  REWRITTEN_ROOT="$(GIT_AUTHOR_NAME="${author_name}" \
+    GIT_AUTHOR_EMAIL="${author_email}" \
+    GIT_AUTHOR_DATE="${author_date}" \
+    GIT_COMMITTER_NAME="${committer_name}" \
+    GIT_COMMITTER_EMAIL="${committer_email}" \
+    GIT_COMMITTER_DATE="${committer_date}" \
+    GIT commit-tree -p "${parent_sha}" -m "${COMMIT_MESSAGE}" "${tree_sha}"
+  )"
+
+  info "Moving the ref to the created commit."
+  GIT update-ref "${REWRITTEN_HEAD}" "${REWRITTEN_ROOT}"
+
+  info "Updating the rewriting state."
+  echo "${sha} ${STATE_COMMITTED}" > "${HISTORY_STATE}"
+}
+
+pre_skip() {
+  info "Checking if it is possible to skip current commit."
+  if ! to_skipped; then
+    die "Cannot skip current commit. You haven't picked the commit yet."
+  fi
+
+}
+
+skip() {
+  pre_skip
+
+  # TODO
+}
+
+status() {
+  :
+  # TODO
+}
+
+pre_finalize() {
+  info "Checking if it is possible to pick the next commit."
+  if ! to_picked; then
+    die "Cannot pick the next commit. You have already picked the commit."
+  fi
+
+  info "Reading the current state."
+  local sha state
+  read -r sha state < "${HISTORY_STATE}"
+
+  info "Checking if the end of history was reached."
+  local last
+  last="$(sed -En '$p' <(GIT rev-list --reverse "${ORIGINAL_HEAD}" "${ORIGINAL_ROOT}"))"
+  if [[ "${sha}" != "$last" ]]; then
+    die "End of history not reached"
+  fi
+}
+
+finalize() {
+  pre_finalize
+
+  # TODO
+}
+
+abort() {
+  info "Removing configuration and state files."
+  rm "${HISTORY_CONFIG}" "${HISTORY_STATE}" 2> /dev/null || true
+
+  info "Removing excluded files from .git/info/exclude."
+  sed -E -i '' "/${EXCLUDE_BEGINNING}/,/${EXCLUDE_ENDING}/d" "${REPO_DIR}/.git/info/exclude"
+
+  info "Checking out the original HEAD."
+  GIT symbolic-ref HEAD "${ORIGINAL_HEAD}"
+  GIT read-tree "${ORIGINAL_HEAD}" || error "Could not checkout ${ORIGINAL_HEAD}"
+  GIT checkout-index -f -a -u
+
+  info "Removing all other files in the working tree."
+  GIT ls-files --others --exclude-standard -z | xargs -0 -r -I{} rm -rf -- "${REPO_DIR}/{}"
+}
+
+rewrite_history() {
+  [[ $# -lt 1 ]] && die "Usage: REPO_DIR=<repo_dir> rewrite_history <cmd>."
+  [[ ! -d "${REPO_DIR}" ]] && die "'${REPO_DIR}' is not a valid directory."
+  ! is_git_repo "${REPO_DIR}" && die "'${REPO_DIR}' is not a git repository."
+
+  local cmd="$1"
+
+  # The flow is
+  # TODO: flow how to work
+  case "${cmd}" in
+    init) init ;;
+    next) next ;;
+    skip) skip ;;
+    commit) commit ;;
+    status) status ;;
+    finilize) finalize ;;
+    abort) abort ;;
+
+    *) die "Command ${cmd} not found." ;;
+  esac
+}
