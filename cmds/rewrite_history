@@ -387,17 +387,19 @@ skip() {
 
 status() {
   info "Reading the original history."
-  local line total_lines
+  local line total_lines message
   if test "${CURRENT_SHA}" == "${DUMMY_COMMIT}"; then
     line=0
   else
     line="$(GIT rev-list --reverse "${ORIGINAL_HEAD}" "${ORIGINAL_ROOT}" | grep -n -F "${CURRENT_SHA}" | cut -d: -f1)"
   fi
   total_lines="$(GIT rev-list --reverse "${ORIGINAL_HEAD}" "${ORIGINAL_ROOT}" | wc -l | awk '{print $1}')"
+  message="$(GIT rev-list -1 --format="%B" "${CURRENT_SHA}" | sed '1d')"
 
   info "Current state: ${CURRENT_STATE}"
-  info "Current sha: ${CURRENT_SHA}"
   info "Current step: ${line}/${total_lines}"
+  info "Current sha: ${CURRENT_SHA}"
+  info "Current commit: ${message}"
 }
 
 pre_finalize() {
