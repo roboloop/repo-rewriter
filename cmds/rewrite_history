@@ -26,7 +26,7 @@ if [[ -s "${HISTORY_CONFIG}" ]]; then
 else
   warn "Using default values for configuration."
   ORIGINAL_ROOT="${ORIGINAL_ROOT:-}"
-  ORIGINAL_HEAD="${ORIGINAL_HEAD:-refs/heads/master}"
+  ORIGINAL_HEAD="${ORIGINAL_HEAD:-refs/heads/main}"
   REWRITTEN_HEAD="${REWRITTEN_HEAD:-refs/heads/rewritten}"
   CURRENT_SHA="${CURRENT_SHA:-}"
   CURRENT_STATE="${CURRENT_STATE:-}"
@@ -75,9 +75,9 @@ pre_init() {
     die "Rewritten process was already initiated."
   fi
 
-  info "Checking if some uncommitted changes exist."
-  if ! GIT diff-index --quiet HEAD; then
-    die "The index or working tree is dirty."
+  info "Checking if ${ORIGINAL_HEAD} exists."
+  if ! GIT show-ref --heads --quiet "${ORIGINAL_HEAD}"; then
+    die "Original HEAD ${ORIGINAL_HEAD} not exist."
   fi
 
   info "Checking if history is not linear."
@@ -94,31 +94,16 @@ pre_init() {
   if ! GIT merge-base --is-ancestor "${ORIGINAL_ROOT}" "${ORIGINAL_HEAD}"; then
     die "${ORIGINAL_ROOT} is not an ancestor of ${ORIGINAL_HEAD}."
   fi
+
+  info "Checking if some uncommitted changes exist."
+  if ! GIT diff-index --quiet HEAD; then
+    die "The index or working tree is dirty."
+  fi
 }
 
 init() {
   pre_init
   has_flag "--dry-run" "$@" && exit 0
-
-#  info "Sanitizing the index initially."
-#  GIT read-tree --empty
-
-#  info "Creating a new root commit (must be dropped at the end of work)."
-#  local tree_root
-#  tree_root="$(GIT write-tree)"
-#  REWRITTEN_ROOT="$(GIT_AUTHOR_NAME="Drop Me" \
-#    GIT_AUTHOR_EMAIL=drop@me \
-#    GIT_AUTHOR_DATE="Thu, 01 Jan 1970 00:00:00 +0000" \
-#    GIT_COMMITTER_NAME="Drop Me" \
-#    GIT_COMMITTER_EMAIL=drop@me \
-#    GIT_COMMITTER_DATE="Thu, 01 Jan 1970 00:00:00 +0000" \
-#    GIT commit-tree "${tree_root}" -m "Drop me at the end"
-#  )"
-#
-#  info "Creating a reference to the root commit."
-#  GIT update-ref "${REWRITTEN_HEAD}" "${REWRITTEN_ROOT}"
-
-  # Move HEAD to that commit
 
   # Utility preparation
   info "Populating .git/info/exclude with originally ignored files."
@@ -227,7 +212,7 @@ pre_commit() {
     die "The current HEAD is not ${symbolic_ref}."
   fi
 
-  info "Picking a base to diff the index against"
+  info "Picking a base to diff the index against."
   local against=HEAD
   if ! GIT rev-parse --verify --quiet HEAD >/dev/null; then
     against=$(GIT hash-object -t tree /dev/null)
@@ -280,7 +265,7 @@ commit() {
     commit_cmd="GIT commit-tree '${tree_sha}'"
   fi
 
-  info "Creating a commit with all available metadata"
+  info "Creating a commit with all available metadata."
   local commit_sha
   commit_sha="$(printf '%s' "${COMMIT_MESSAGE}" | \
     GIT_AUTHOR_NAME="${author_name}" \
@@ -302,7 +287,7 @@ commit() {
 pre_rollback() {
   info "Checking if it is possible to rollback to the previous commit."
   if [[ -z "${CURRENT_STATE}" ]]; then
-    die "Initialization processes not started."
+    die "Rewriting processes not started."
   fi
 
   if [[ "${CURRENT_SHA}" == "${ORIGINAL_ROOT}" ]]; then
@@ -323,7 +308,7 @@ rollback() {
     local previous_sha
     previous_sha="$(GIT rev-list HEAD~1 -1)"
 
-    info "Sanitizing the index and populating the working tree with previous commit"
+    info "Sanitizing the index and populating the working tree with previous commit."
     GIT read-tree "${previous_sha}"
     GIT checkout-index -a -f -u
     GIT ls-files --others --exclude-standard -z | xargs -0 -r -I{} rm -rf -- "${REPO_DIR}/{}"
@@ -353,7 +338,7 @@ pre_skip() {
     die "The current HEAD is not ${symbolic_ref}."
   fi
 
-  info "Picking a base to diff the index against"
+  info "Picking a base to diff the index against."
   local against=HEAD
   if ! GIT rev-parse --verify --quiet HEAD >/dev/null; then
     against=$(GIT hash-object -t tree /dev/null)
@@ -383,7 +368,7 @@ skip() {
   local current_sha
   read -r current_sha < <(GIT rev-list HEAD -1)
 
-  info "Sanitizing the index and populating the working tree with current HEAD"
+  info "Sanitizing the index and populating the working tree with current HEAD."
   GIT read-tree "${current_sha}"
   GIT checkout-index -a -f -u
   GIT ls-files --others --exclude-standard -z | xargs -0 -r -I{} rm -rf -- "${REPO_DIR}/{}"
@@ -393,6 +378,10 @@ skip() {
 }
 
 status() {
+  if [[ -z "${CURRENT_STATE}" ]]; then
+    die "Rewriting processes not started."
+  fi
+
   info "Reading the original history."
   local line total_lines message
   line="$(GIT rev-list --reverse "${ORIGINAL_HEAD}" "${ORIGINAL_ROOT}" | grep -n -F "${CURRENT_SHA}" | cut -d: -f1)"
@@ -406,7 +395,10 @@ status() {
 }
 
 pre_finalize() {
-  info "Checking if it is possible to pick the next commit."
+  info "Checking if it is possible to finalize the work."
+  if [[ -z "${CURRENT_STATE}" ]]; then
+    die "Rewriting processes not started."
+  fi
   if [[ "${CURRENT_STATE}" != "${STATE_COMMITTED}" && "${CURRENT_STATE}" != "${STATE_SKIPPED}" ]]; then
     die "Cannot finalize. You picked the commit."
   fi
@@ -414,15 +406,25 @@ pre_finalize() {
   info "Checking if the end of history was reached."
   local last_sha
   last_sha="$(sed -En '$p' <(GIT rev-list --reverse "${ORIGINAL_HEAD}" "${ORIGINAL_ROOT}"))"
-  if [[ "${CURRENT_STATE}" != "${last_sha}" ]]; then
-    die "End of history not reached"
+  if [[ "${CURRENT_SHA}" != "${last_sha}" ]]; then
+    die "End of history not reached."
   fi
 }
 
 finalize() {
   pre_finalize
 
-  # TODO
+  info "Moving ${ORIGINAL_HEAD} to the rewritten commit."
+  GIT update-ref "${ORIGINAL_HEAD}" "${REWRITTEN_HEAD}"
+
+  info "Removing reference to rewritten branch."
+  GIT update-ref -d "${REWRITTEN_HEAD}"
+
+  info "Removing configuration file."
+  rm "${HISTORY_CONFIG}" 2> /dev/null || true
+
+  info "Removing excluded files from .git/info/exclude."
+  sed -E -i '' "/${EXCLUDE_BEGINNING}/,/${EXCLUDE_ENDING}/d" "${REPO_DIR}/.git/info/exclude"
 }
 
 abort() {
@@ -459,7 +461,7 @@ rewrite_history() {
     skip) skip "$@" ;;
     commit) commit "$@" ;;
     status) status "$@" ;;
-    finilize) finalize "$@" ;;
+    finalize) finalize "$@" ;;
     abort) abort "$@" ;;
 
     *) die "Command ${cmd} not found." ;;
