@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+REPO_DIR="${REPO_DIR:?REPO_DIR is not set}"
+
+merge() {
+  printf "[merge] %s %s %s %s %s %s %s\n" "$@" >&2
+
+  git -C "${REPO_DIR}" merge-one-file "$@"
+}
+
+merge "$@"

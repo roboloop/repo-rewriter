@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+SCRIPT_DIR=$(CDPATH="" cd -- "$(dirname -- "$0")" && pwd)
+ROOT_DIR=$(CDPATH="" cd -- "${SCRIPT_DIR}/.." && pwd)
+. "${ROOT_DIR}/lib/common"
+
+print_files() {
+  local repo_dir
+  repo_dir="$1"
+
+  git -C "${repo_dir}" log --pretty=format: --name-only --diff-filter=ACDMRT | sort -u
+}
