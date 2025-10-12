@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+SCRIPT_DIR=$(CDPATH="" cd -- "$(dirname -- "$0")" && pwd)
+ROOT_DIR=$(CDPATH="" cd -- "${SCRIPT_DIR}/.." && pwd)
+. "${ROOT_DIR}/lib/common"
+. "${ROOT_DIR}/lib/copy"
+
+drop_files() {
+  local repo_dir="$1"; shift
+
+  for arg in "$@"; do
+    info "Applying glob ${arg}"
+    git -C "${repo_dir}" filter-repo --invert-paths --path-glob "${arg}"
+  done
+}

@@ -188,15 +188,32 @@ pick() {
   next_sha="$(sed -En "/^${CURRENT_SHA}\$/{n;p;q;}" <(GIT rev-list --reverse "${ORIGINAL_HEAD}" "${ORIGINAL_ROOT}"))"
   info "The ${next_sha} commit has taken."
 
-  info "Populating the working tree with changes from the picked commit."
-  local tmp
-  tmp="$(mktemp)"
-  GIT_INDEX_FILE="${tmp}" git -C "${REPO_DIR}" read-tree "${next_sha}"
-  GIT_INDEX_FILE="${tmp}" git -C "${REPO_DIR}" checkout-index -a -f
-  rm -f "${tmp}"
+  info "Populating temporary index with changes from the picked commit (with 3-way merge)."
+  local idx ours
+  idx="$(mktemp -d)/index"
+  ours="$(GIT write-tree)"
+  GIT_INDEX_FILE="${idx}" GIT read-tree -m --aggressive "${CURRENT_SHA}" "${ours}" "${next_sha}"
+  GIT_INDEX_FILE="${idx}" GIT checkout-index -a -f
+  GIT_INDEX_FILE="${idx}" REPO_DIR="${REPO_DIR}" GIT merge-index -o -q "${ROOT_DIR}/cmds/merge" -a || true
+
+  info "Placing conflict files in the index."
+  if GIT_INDEX_FILE="${idx}" GIT ls-files -u | grep -q .; then
+    GIT_INDEX_FILE="${idx}" GIT ls-files -u --format='%(path)' -z | GIT update-index -z --force-remove --stdin
+    GIT_INDEX_FILE="${idx}" GIT ls-files -u -z | GIT update-index -z --index-info
+  fi
+
+  info "Sanitizing working tree from non conflict files."
+  while IFS= read -r -d '' p; do
+    if ! GIT_INDEX_FILE="$idx" GIT ls-files --error-unmatch -- "${p}" 2> /dev/null; then
+      rm -rf -- "${REPO_DIR}/${p}"
+    fi
+  done < <(GIT diff-tree -z -r --diff-filter=D --name-only "${next_sha}~1" "${next_sha}")
+
 
   info "Updating the rewriting state."
   update_state "${next_sha}" "${STATE_PICKED}"
+
+  status
 }
 
 pre_commit() {
@@ -220,7 +237,11 @@ pre_commit() {
 
   info "Checking if there are staged files present."
   if GIT diff-index --cached --quiet "${against}" --; then
-    die "Nothing to commit."
+    if GIT diff-tree --quiet "${CURRENT_SHA}~1" "${CURRENT_SHA}"; then
+      warn "Committing empty commit"
+    else
+      die "Nothing to commit."
+    fi
   fi
 
   info "Checking if there are unstaged files present."
@@ -282,6 +303,8 @@ commit() {
 
   info "Updating the rewriting state."
   update_state "${CURRENT_SHA}" "${STATE_COMMITTED}"
+
+  status
 }
 
 pre_rollback() {
@@ -303,7 +326,16 @@ rollback() {
     info "Skipping rollback of rewritten history."
   elif ! GIT rev-list HEAD~1 -1 2> /dev/null; then
     warn "Skipping rollback of rewritten history due to reaching the root."
+  elif [[ "${CURRENT_STATE}" == "${STATE_PICKED}" ]]; then
+    info "Cleaning working tree."
+
+    info "Sanitizing the index and populating the working tree with current commit."
+    GIT read-tree HEAD
+    GIT checkout-index -a -f -u
+    GIT ls-files --others --exclude-standard -z | xargs -0 -r -I{} rm -rf -- "${REPO_DIR}/{}"
   else
+    info "Rolling back to the previous commit."
+
     info "Getting the previous commit."
     local previous_sha
     previous_sha="$(GIT rev-list HEAD~1 -1)"
@@ -323,6 +355,8 @@ rollback() {
 
   info "Updating the rewriting state."
   update_state "${original_previous_sha}" "${STATE_COMMITTED}"
+
+  status
 }
 
 pre_skip() {
@@ -416,6 +450,9 @@ finalize() {
 
   info "Moving ${ORIGINAL_HEAD} to the rewritten commit."
   GIT update-ref "${ORIGINAL_HEAD}" "${REWRITTEN_HEAD}"
+
+  info "Repointing HEAD to ${ORIGINAL_HEAD} branch."
+  GIT symbolic-ref HEAD "${ORIGINAL_HEAD}"
 
   info "Removing reference to rewritten branch."
   GIT update-ref -d "${REWRITTEN_HEAD}"

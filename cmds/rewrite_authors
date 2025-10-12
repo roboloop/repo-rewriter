@@ -10,7 +10,7 @@ ROOT_DIR=$(CDPATH="" cd -- "${SCRIPT_DIR}/.." && pwd)
 rewrite_authors() {
   [[ "$#" -lt 2 ]] && die "Usage: rewrite_authors <repo_dir> <mailmap_path>"
   [[ ! -d "$1" ]] && die "'$1' is not a valid directory"
-  [[ ! -f "$2" ]] && die "'$2' is not a valid file path"
+  [[ ! -e "$2" && ! -r "$2" ]] && die "'$2' is not a valid file path"
 
   local repo_dir mailmap_path
   repo_dir="$1"
@@ -20,6 +20,9 @@ rewrite_authors() {
 
   local list changed="" skipped=""
   list="$(print_authors "${repo_dir}")"
+
+  local mailmap
+  mailmap="$(cat "${mailmap_path}")"
 
   local line regex old_name old_email new_name new_email
   regex='([^<]*)<([^>]*)>([^<]*)<([^>]*)>'
@@ -40,7 +43,7 @@ rewrite_authors() {
     else
       skipped+="${old_name} <${old_email}>\t${new_name} <${new_email}>"$'\n'
     fi
-  done < "${mailmap_path}"
+  done <<< "${mailmap}"
 
   if [[ -n "${skipped}" ]]; then
     (
@@ -59,5 +62,5 @@ rewrite_authors() {
     echo "no emails will be changed" >&2 && exit 1
   fi
 
-  git -C "${repo_dir}" filter-repo --force --mailmap "${mailmap_path}"
+  git -C "${repo_dir}" filter-repo --force --mailmap <(printf "%s" "${mailmap}")
 }
