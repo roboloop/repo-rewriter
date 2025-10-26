@@ -9,8 +9,14 @@ ROOT_DIR=$(CDPATH="" cd -- "${SCRIPT_DIR}/.." && pwd)
 search_in_commits() {
   local text="$1"
   local ignore_case=
+  local word_regexp=
+  local perl_regexp=
+  local grep="${text}"
 
   has_flag "-i" "$@" && ignore_case="-i"
+  has_flag "-w" "$@" && word_regexp="--word-regexp" && perl_regexp="--perl-regexp"
 
-  git -C "${REPO_DIR}" log --no-color --all --grep="${text}" ${ignore_case} | grep --color=always -E ${ignore_case} "${text}|\$" || true
+  [[ -n "${word_regexp}" ]] && grep="$(printf '\\b\\Q%s\\E\\b' "${text}")"
+
+  git -C "${REPO_DIR}" --no-pager log --color=always --all --grep="${grep}" ${ignore_case} ${perl_regexp}
 }

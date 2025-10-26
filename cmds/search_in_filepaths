@@ -9,8 +9,11 @@ ROOT_DIR=$(CDPATH="" cd -- "${SCRIPT_DIR}/.." && pwd)
 search_in_filepaths() {
   local text="$1"
   local ignore_case=
+  local word_regexp=
 
   has_flag "-i" "$@" && ignore_case="--ignore-case"
+  has_flag "-w" "$@" && word_regexp="--word-regexp"
 
-  git -C "${REPO_DIR}" log --all --name-only --pretty= | grep --color=always -E ${ignore_case} "${text}"
+  git -C "${REPO_DIR}" log --all --name-only --pretty= \
+  | grep --color=always -E ${ignore_case} ${word_regexp} "${text}" || true
 }
