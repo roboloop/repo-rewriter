@@ -13,6 +13,9 @@ set -Eeuo pipefail
 #   ./rewriter rewrite_history                            rebuild all history commit by commit
 #   ./rewriter show_authors <repo_dir>                    print all authors
 #   ./rewriter make_backup <repo_dir>                     make backup
+#   ./rewriter search_in_commits <text>                   search in commits
+#   ./rewriter search_in_filepaths <text>                 search in filepaths
+#   ./rewriter search_in_trees <text>                     search in trees
 
 command -v git-filter-repo &> /dev/null || ( echo "git-filter-repo not found" >&2 && exit 1 )
 command -v column &> /dev/null || ( echo "column not found" >&2 && exit 1 )

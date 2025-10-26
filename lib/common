@@ -38,12 +38,26 @@ fr_log() {
 
 has_flag() {
   local flag="$1"; shift
+  local key value
 
   for arg in "$@"; do
-    [[ "${arg}" == "${flag}" ]] && return 0
+    grep -q "^-" <<< "${arg}" || continue
+
+    IFS='=' read -r key value <<< "${arg}"
+    [[ "${key}" == "${flag}" ]] && return 0
   done
 
   return 1
+}
+
+flag_value() {
+  local flag="$1"; shift
+  local key value
+
+  for arg in "$@"; do
+    IFS='=' read -r key value <<< "${arg}"
+    [[ "${key}" == "${flag}" ]] && printf '%s' "${value}" && return
+  done
 }
 
 is_git_repo() {
