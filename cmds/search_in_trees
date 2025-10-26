@@ -12,10 +12,12 @@ GIT() {
 
 # Produces in format commit:filepath:count (sorted by commit, filepath)
 grep_commits() {
-  local text="$1"; shift
+  local text="$1"
+  local pathspec="$2"
+  shift 2
   local grep_flags="$@"
 
-  GIT grep --no-color -l ${grep_flags} -- "${text}" $(GIT rev-list --all)
+  GIT --no-pager grep --no-color -l ${grep_flags} -- "${text}" $(GIT rev-list --all) -- ${pathspec} || true
 }
 
 # Produces in format commit<tab>filepath<tab>blob_sha
@@ -99,16 +101,18 @@ search_in_trees() {
   local ignore_case=
   local context_num=2
   local context="--context=${context_num}"
+  local pathspec=
 
   has_flag "-i" "$@" && ignore_case="--ignore-case"
   has_flag "-C" "$@" && context_num="$(flag_value "-C" "$@")" && context="--context=${context_num}"
+  has_flag "--pathspec" "$@" && pathspec="$(flag_value "--pathspec" "$@" | paste -sd' ' -)"
 
   local prev_commit
   local prev_filepath=
   local empty_commit="$(GIT hash-object -t tree /dev/null)"
   local l1 l2 lines
 
-  grep_commits "${text}" "${ignore_case}" \
+  grep_commits "${text}" "${pathspec}" "${ignore_case}" \
   | add_blob_sha \
   | group_by_filepath \
   | while IFS=$'\t' read -r total commit filepath blob_sha; do

@@ -4,11 +4,11 @@ set -Eeuo pipefail
 
 trap print_stack ERR
 print_stack() {
-    echo "❌ Error occurred at line $LINENO in script $0. Stack trace:"
-    for i in "${!FUNCNAME[@]}"; do
-        [[ $i -eq 0 ]] && continue
-        echo "  at ${FUNCNAME[$i]}() in ${BASH_SOURCE[$i]}:${BASH_LINENO[$((i - 1))]}"
-    done
+  echo "❌ Error occurred at line $LINENO in script $0. Stack trace:" >&2
+  for i in "${!FUNCNAME[@]}"; do
+    [[ $i -eq 0 ]] && continue
+    echo "  at ${FUNCNAME[$i]}() in ${BASH_SOURCE[$i]}:${BASH_LINENO[$((i - 1))]}" >&2
+  done
 }
 
 info() {
@@ -56,7 +56,7 @@ flag_value() {
 
   for arg in "$@"; do
     IFS='=' read -r key value <<< "${arg}"
-    [[ "${key}" == "${flag}" ]] && printf '%s' "${value}" && return
+    [[ "${key}" == "${flag}" ]] && printf '%s\n' "${value}"
   done
 }
 
