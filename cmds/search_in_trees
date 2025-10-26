@@ -99,20 +99,22 @@ print_lines() {
 search_in_trees() {
   local text="$1"; shift
   local ignore_case=
+  local word_regexp=
   local context_num=2
   local context="--context=${context_num}"
   local pathspec=
 
   has_flag "-i" "$@" && ignore_case="--ignore-case"
+  has_flag "-w" "$@" && word_regexp="--word-regexp"
   has_flag "-C" "$@" && context_num="$(flag_value "-C" "$@")" && context="--context=${context_num}"
-  has_flag "--pathspec" "$@" && pathspec="$(flag_value "--pathspec" "$@" | paste -sd' ' -)"
+  has_flag "-p" "$@" && pathspec="$(flag_value "-p" "$@" | paste -sd' ' -)"
 
   local prev_commit
   local prev_filepath=
   local empty_commit="$(GIT hash-object -t tree /dev/null)"
   local l1 l2 lines
 
-  grep_commits "${text}" "${pathspec}" "${ignore_case}" \
+  grep_commits "${text}" "${pathspec}" "${ignore_case}" "${word_regexp}" \
   | add_blob_sha \
   | group_by_filepath \
   | while IFS=$'\t' read -r total commit filepath blob_sha; do
@@ -122,10 +124,12 @@ search_in_trees() {
       fi
 
       l1="$(hunk_lines "${prev_commit}" "${commit}" "${filepath}")"
-      l2="$(match_lines "${blob_sha}" "${text}" "${ignore_case}")"
+      l2="$(match_lines "${blob_sha}" "${text}" "${ignore_case}" "${word_regexp}")"
       lines="$(intersect "${l1}" "${l2}")"
 
-      [[ -n "${lines}" ]] && print_lines "${blob_sha}" "${text}" "${lines}" "${context_num}" "${ignore_case}" "${context}"
+      if [[ -n "${lines}" ]]; then
+        print_lines "${blob_sha}" "${text}" "${lines}" "${context_num}" "${ignore_case}" "${word_regexp}" "${context}"
+      fi
 
       prev_commit="${commit}"
       prev_filepath="${filepath}"
