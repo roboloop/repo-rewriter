@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+SCRIPT_DIR=$(CDPATH="" cd -- "$(dirname -- "$0")" && pwd)
+ROOT_DIR=$(CDPATH="" cd -- "${SCRIPT_DIR}/.." && pwd)
+. "${ROOT_DIR}/lib/common"
+
+
+search_in_commits() {
+  local text="$1"
+  local ignore_case=
+
+  has_flag "-i" "$@" && ignore_case="-i"
+
+  git -C "${REPO_DIR}" log --all --grep="${text}" ${ignore_case} | grep --color=always -E ${ignore_case} "${text}|\$"
+}
