@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+SCRIPT_DIR=$(CDPATH="" cd -- "$(dirname -- "$0")" && pwd)
+ROOT_DIR=$(CDPATH="" cd -- "${SCRIPT_DIR}/.." && pwd)
+. "${ROOT_DIR}/lib/common"
+
+GIT() {
+  git -C "${REPO_DIR}" "$@"
+}
+
+rewrite_in_filepaths() {
+  local search="$1"
+  local replace="$2"
+  local ignore_case=
+  local word_regexp=
+
+  shift 2
+  has_flag "-i" "$@" && ignore_case="--ignore-case"
+  has_flag "-w" "$@" && word_regexp="--word-regexp"
+
+  local python_flags=
+  local python_search="${search}"
+  [[ -n "${ignore_case}" ]] && python_flags="flags=re.IGNORECASE"
+  [[ -n "${word_regexp}" ]] && python_search="\\b${python_search}\\b"
+
+  local python_filepaths
+  python_filepaths="$(GIT --no-pager log --all --name-only --pretty= \
+    | sort \
+    | uniq \
+    | grep --color=never ${ignore_case} ${word_regexp} "${search}" \
+    | sed -E 's/^(.+)$/b"\1",/' \
+    | paste -sd' ' - || true
+  )"
+
+  [[ -z "${python_filepaths}" ]] && die "Nothing to rewrite."
+
+  local python_code
+  python_code="$(cat <<EOF
+import re, sys
+filepaths = { ${python_filepaths} }
+${if:-if} filename not in filepaths:
+    return filename
+
+return re.sub(br"${python_search}", b"${replace}", filename, ${python_flags})
+EOF
+)"
+
+  GIT filter-repo --force --filename-callback "${python_code}"
+}

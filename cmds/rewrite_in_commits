@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+SCRIPT_DIR=$(CDPATH="" cd -- "$(dirname -- "$0")" && pwd)
+ROOT_DIR=$(CDPATH="" cd -- "${SCRIPT_DIR}/.." && pwd)
+. "${ROOT_DIR}/lib/common"
+
+GIT() {
+  git -C "${REPO_DIR}" "$@"
+}
+
+rewrite_in_commits() {
+  local search="$1"
+  local replace="$2"
+  local ignore_case=
+  local word_regexp=
+  local perl_regexp=
+  local grep="${search}"
+
+  shift 2
+  has_flag "-i" "$@" && ignore_case="-i"
+  has_flag "-w" "$@" && word_regexp="--word-regexp" && perl_regexp="--perl-regexp"
+
+  [[ -n "${word_regexp}" ]] && grep="$(printf '\\b\\Q%s\\E\\b' "${search}")"
+
+  local python_flags=
+  local python_search="${search}"
+  [[ -n "${ignore_case}" ]] && python_flags="flags=re.IGNORECASE"
+  [[ -n "${word_regexp}" ]] && python_search="\\b${python_search}\\b"
+
+  local python_commits
+  python_commits="$(GIT --no-pager log --pretty=format:%H --color=always --all --grep="${grep}" ${ignore_case} ${perl_regexp} \
+    | sed -E 's/^(.+)$/b"\1",/' \
+    | paste -sd' ' -
+  )"
+
+  [[ -z "${python_commits}" ]] && die "Nothing to rewrite."
+
+  local python_code
+  python_code="$(cat <<EOF
+import re, sys
+commits = { ${python_commits} }
+${if:-if} commit.original_id not in commits:
+    return
+
+commit.message = re.sub(br"${python_search}", b"${replace}", commit.message, ${python_flags})
+EOF
+)"
+
+  GIT filter-repo --force --commit-callback "${python_code}"
+}

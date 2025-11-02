@@ -6,17 +6,22 @@ SCRIPT_DIR=$(CDPATH="" cd -- "$(dirname -- "$0")" && pwd)
 ROOT_DIR=$(CDPATH="" cd -- "${SCRIPT_DIR}/.." && pwd)
 . "${ROOT_DIR}/lib/common"
 
+GIT() {
+  git -C "${REPO_DIR}" "$@"
+}
+
 search_in_commits() {
-  local text="$1"
+  local search="$1"
+
   local ignore_case=
   local word_regexp=
   local perl_regexp=
-  local grep="${text}"
+  local grep="${search}"
 
   has_flag "-i" "$@" && ignore_case="-i"
   has_flag "-w" "$@" && word_regexp="--word-regexp" && perl_regexp="--perl-regexp"
 
-  [[ -n "${word_regexp}" ]] && grep="$(printf '\\b\\Q%s\\E\\b' "${text}")"
+  [[ -n "${word_regexp}" ]] && grep="$(printf '\\b\\Q%s\\E\\b' "${search}")"
 
-  git -C "${REPO_DIR}" --no-pager log --color=always --all --grep="${grep}" ${ignore_case} ${perl_regexp}
+  GIT --no-pager log --color=always --all --grep="${grep}" ${ignore_case} ${perl_regexp}
 }

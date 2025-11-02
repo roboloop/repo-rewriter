@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+SCRIPT_DIR=$(CDPATH="" cd -- "$(dirname -- "$0")" && pwd)
+ROOT_DIR=$(CDPATH="" cd -- "${SCRIPT_DIR}/.." && pwd)
+. "${ROOT_DIR}/lib/common"
+
+GIT() {
+  git -C "${REPO_DIR}" "$@"
+}
+
+# Produces in format commit:filepath:count (sorted by commit, filepath)
+grep_commits() {
+  local search="$1"
+  local pathspec="$2"
+  shift 2
+  local grep_flags="$@"
+
+  GIT --no-pager grep --no-color -I -l ${grep_flags} -- "${search}" $(GIT rev-list --all) -- ${pathspec} || true
+}
+
+# Produces in format blob_sha
+file_blobs() {
+  sed -E 's/^([^:]+):(.+)$/\1:\2/' \
+  | GIT cat-file --batch-check=$'%(objectname)' \
+  | sort \
+  | uniq
+}
+
+rewrite_in_trees() {
+  local search="$1"
+  local replace="$2"
+  local ignore_case=
+  local word_regexp=
+  local pathspec=
+
+  shift 2
+  has_flag "-i" "$@" && ignore_case="--ignore-case"
+  has_flag "-w" "$@" && word_regexp="--word-regexp"
+  has_flag "-p" "$@" && pathspec="$(flag_value "-p" "$@" | paste -sd' ' -)"
+
+  local python_flags=
+  local python_search="${search}"
+  [[ -n "${ignore_case}" ]] && python_flags="flags=re.IGNORECASE"
+  [[ -n "${word_regexp}" ]] && python_search="\\b${python_search}\\b"
+
+  local python_blobs
+  python_blobs="$(grep_commits "${search}" "${pathspec}" "${ignore_case}" "${word_regexp}" \
+    | file_blobs \
+    | sed -E 's/^(.+)$/b"\1",/' \
+    | paste -sd' ' -
+  )"
+
+  [[ -z "${python_blobs}" ]] && die "Nothing to rewrite."
+
+  local python_code
+  python_code="$(cat <<EOF
+import re, sys
+blobs = { ${python_blobs} }
+${if:-if} blob.original_id not in blobs:
+    return
+
+blob.data = re.sub(br"${python_search}", b"${replace}", blob.data, ${python_flags})
+EOF
+)"
+
+  GIT filter-repo --force --blob-callback "${python_code}"
+}

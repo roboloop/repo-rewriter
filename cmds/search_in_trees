@@ -6,33 +6,36 @@ SCRIPT_DIR=$(CDPATH="" cd -- "$(dirname -- "$0")" && pwd)
 ROOT_DIR=$(CDPATH="" cd -- "${SCRIPT_DIR}/.." && pwd)
 . "${ROOT_DIR}/lib/common"
 
+OFFSET="---"
+OFFSET_LEN=3
+
 GIT() {
   git -C "${REPO_DIR}" "$@"
 }
 
 # Produces in format commit:filepath:count (sorted by commit, filepath)
 grep_commits() {
-  local text="$1"
+  local search="$1"
   local pathspec="$2"
   shift 2
   local grep_flags="$@"
 
-  GIT --no-pager grep --no-color -l ${grep_flags} -- "${text}" $(GIT rev-list --all) -- ${pathspec} || true
+  GIT --no-pager grep --no-color -I -l ${grep_flags} -- "${search}" $(GIT rev-list --all) -- ${pathspec} || true
 }
 
 # Produces in format commit<tab>filepath<tab>blob_sha
 add_blob_sha() {
-  sed -E 's/^([^:]+):(.+)$/\1:\2\t\1\t\2/' | GIT cat-file --batch-check=$'%(rest)\t%(objectname)'
+  sed -E 's/^([^:]+):(.+)$/\1:\2\t\1\t\2/' \
+  | GIT cat-file --batch-check=$'%(rest)\t%(objectname)'
 }
 
-# Produces in format total<tab>oldest_commit<tab>filepath<tab>blob_sha
+# Produces in format commit<tab>filepath<tab>blob_sha
 group_by_filepath() {
   cat -n \
   | sed 's/^[[:space:]]*//' \
   | sort -t $'\t' -k3,3 -k1,1nr \
   | cut -d $'\t' -f2- \
-  | uniq -f1 -c \
-  | sed -E 's/^[[:space:]]*([[:digit:]]*)[[:space:]]*/\1\t/'
+  | uniq -f1
 }
 
 # Produces ranges of hunk lines (column format)
@@ -42,7 +45,8 @@ hunk_lines() {
   local filepath="$3"
 
   GIT diff-tree -U0 --no-color "${prev_commit}" "${commit}" -- "${filepath}" \
-  | grep '^@@' | sed -E 's/^@@ -[0-9]+(,[0-9]+)? \+([0-9]+)(,([0-9]+))? @@.*$/\2 \4/' \
+  | grep '^@@' \
+  | sed -E 's/^@@ -[0-9]+(,[0-9]+)? \+([0-9]+)(,([0-9]+))? @@.*$/\2 \4/' \
   | while read -r start len; do
       : "${len:=1}"
       [[ "${len}" -eq 0 ]] && continue
@@ -54,11 +58,11 @@ hunk_lines() {
 # Produces a matches line (column format)
 match_lines() {
   local blob_sha="$1"
-  local text="$2"
+  local search="$2"
   shift 2
   local grep_flags="$@"
 
-  GIT cat-file -p "${blob_sha}" | grep -n ${grep_flags} "${text}" | cut -d: -f1
+  GIT cat-file -p "${blob_sha}" | grep -n ${grep_flags} "${search}" | cut -d: -f1
 }
 
 # Produces set of intersected lines (column format)
@@ -71,33 +75,32 @@ intersect() {
 
 print_lines() {
   local blob_sha="$1"
-  local text="$2"
+  local search="$2"
   local lines="$3"
   local context="$4"
   shift 4;
   local grep_flags="$@"
 
-  local offset=3
   local i=0
 
-  echo "--- ${blob_sha}"
+  echo "${OFFSET} ${blob_sha}"
   echo -n "${lines}" | \
   while read -r line_number || [[ -n "${line_number}" ]]; do
     start=$((line_number - context))
     [[ "${start}" -le 0 ]] && start=1
     end=$((line_number + context))
 
-    [[ $((i++)) -ge 1 ]] && echo '---'
+    [[ $((i++)) -ge 1 ]] && echo "${OFFSET}"
 
     GIT cat-file -p "${blob_sha}" \
-    | nl -ba -w"${offset}" -s' ' \
+    | nl -ba -w"${OFFSET_LEN}" -s' ' \
     | sed -n "${start},${end}p" \
-    | grep --color=always ${grep_flags} "${text}"
+    | grep --color=always ${grep_flags} "${search}"
   done
 }
 
 search_in_trees() {
-  local text="$1"; shift
+  local search="$1"; shift
   local ignore_case=
   local word_regexp=
   local context_num=2
@@ -114,21 +117,21 @@ search_in_trees() {
   local empty_commit="$(GIT hash-object -t tree /dev/null)"
   local l1 l2 lines
 
-  grep_commits "${text}" "${pathspec}" "${ignore_case}" "${word_regexp}" \
+  grep_commits "${search}" "${pathspec}" "${ignore_case}" "${word_regexp}" \
   | add_blob_sha \
   | group_by_filepath \
-  | while IFS=$'\t' read -r total commit filepath blob_sha; do
+  | while IFS=$'\t' read -r commit filepath blob_sha; do
       if [[ "${prev_filepath}" != "${filepath}" ]]; then
          prev_commit="${empty_commit}"
-         echo -e "--- \e[30;43m${filepath}\e[0m"
+         echo -e "${OFFSET} \e[30;43m${filepath}\e[0m"
       fi
 
       l1="$(hunk_lines "${prev_commit}" "${commit}" "${filepath}")"
-      l2="$(match_lines "${blob_sha}" "${text}" "${ignore_case}" "${word_regexp}")"
+      l2="$(match_lines "${blob_sha}" "${search}" "${ignore_case}" "${word_regexp}")"
       lines="$(intersect "${l1}" "${l2}")"
 
       if [[ -n "${lines}" ]]; then
-        print_lines "${blob_sha}" "${text}" "${lines}" "${context_num}" "${ignore_case}" "${word_regexp}" "${context}"
+        print_lines "${blob_sha}" "${search}" "${lines}" "${context_num}" "${ignore_case}" "${word_regexp}" "${context}"
       fi
 
       prev_commit="${commit}"
