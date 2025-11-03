@@ -10,6 +10,12 @@ GIT() {
   git -C "${REPO_DIR}" "$@"
 }
 
+grep_commits() {
+  local grep_flags="$@"
+
+  GIT --no-pager log --all ${grep_flags}
+}
+
 search_in_commits() {
   local search="$1"
 
@@ -23,5 +29,16 @@ search_in_commits() {
 
   [[ -n "${word_regexp}" ]] && grep="$(printf '\\b\\Q%s\\E\\b' "${search}")"
 
-  GIT --no-pager log --color=always --all --grep="${grep}" ${ignore_case} ${perl_regexp}
+  grep_commits --grep="${grep}" ${ignore_case} ${perl_regexp} --color=always
+
+  # Calculate stats
+  local shas total_commits=0 total_found=0
+  total_commits="$(grep_commits --pretty=format:%H --grep="${grep}" ${ignore_case} ${perl_regexp} | wc -l | awk '{print $1}')"
+  total_found="$(grep_commits --pretty=format:%B --grep="${grep}" ${ignore_case} ${perl_regexp} \
+    | grep -o "${grep}" ${ignore_case} ${word_regexp} \
+    | wc -l | awk '{print $1}' || true
+  )"
+
+  echo "Total commits: ${total_commits}"
+  echo "Total found: ${total_found}"
 }

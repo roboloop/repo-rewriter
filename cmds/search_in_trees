@@ -116,25 +116,32 @@ search_in_trees() {
   local prev_filepath=
   local empty_commit="$(GIT hash-object -t tree /dev/null)"
   local l1 l2 lines
+  local found= total_files=0 total_found=0
 
-  grep_commits "${search}" "${pathspec}" "${ignore_case}" "${word_regexp}" \
-  | add_blob_sha \
-  | group_by_filepath \
-  | while IFS=$'\t' read -r commit filepath blob_sha; do
-      if [[ "${prev_filepath}" != "${filepath}" ]]; then
-         prev_commit="${empty_commit}"
-         echo -e "${OFFSET} \e[30;43m${filepath}\e[0m"
-      fi
+  while IFS=$'\t' read -r commit filepath blob_sha; do
+    if [[ "${prev_filepath}" != "${filepath}" ]]; then
+       prev_commit="${empty_commit}"
+       echo -e "${OFFSET} \e[30;43m${filepath}\e[0m"
+       : $((++total_files))
+    fi
 
-      l1="$(hunk_lines "${prev_commit}" "${commit}" "${filepath}")"
-      l2="$(match_lines "${blob_sha}" "${search}" "${ignore_case}" "${word_regexp}")"
-      lines="$(intersect "${l1}" "${l2}")"
+    l1="$(hunk_lines "${prev_commit}" "${commit}" "${filepath}")"
+    l2="$(match_lines "${blob_sha}" "${search}" "${ignore_case}" "${word_regexp}")"
+    lines="$(intersect "${l1}" "${l2}")"
 
-      if [[ -n "${lines}" ]]; then
-        print_lines "${blob_sha}" "${search}" "${lines}" "${context_num}" "${ignore_case}" "${word_regexp}" "${context}"
-      fi
+    if [[ -n "${lines}" ]]; then
+      print_lines "${blob_sha}" "${search}" "${lines}" "${context_num}" "${ignore_case}" "${word_regexp}" "${context}"
+      found="$(echo "${lines}" | wc -l | awk '{print $1}')"
+      total_found=$((total_found + found))
+    fi
 
-      prev_commit="${commit}"
-      prev_filepath="${filepath}"
-    done
+    prev_commit="${commit}"
+    prev_filepath="${filepath}"
+    done < <(grep_commits "${search}" "${pathspec}" "${ignore_case}" "${word_regexp}" \
+      | add_blob_sha \
+      | group_by_filepath)
+
+    # Calculate stats
+    echo "Total files: ${total_files}"
+    echo "Total found: ${total_found}"
 }

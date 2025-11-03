@@ -42,8 +42,14 @@ rewrite_in_trees() {
 
   local python_flags=
   local python_search="${search}"
-  [[ -n "${ignore_case}" ]] && python_flags="flags=re.IGNORECASE"
-  [[ -n "${word_regexp}" ]] && python_search="\\b${python_search}\\b"
+  local python_regex=
+  [[ -n "${ignore_case}" ]] && python_flags="flags=re.IGNORECASE" && python_regex='1'
+  [[ -n "${word_regexp}" ]] && python_search="\\b${python_search}\\b" && python_regex='1'
+
+  local python_re_sub="re.sub(br'${python_search}', b'${replace}', blob.data, ${python_flags})"
+  local python_replace="blob.data.replace(b'${search}', b'${replace}')"
+  local python_final_line=
+  [[ -n "${python_regex}" ]] && python_final_line="${python_re_sub}" || python_final_line="${python_replace}"
 
   local python_blobs
   python_blobs="$(grep_commits "${search}" "${pathspec}" "${ignore_case}" "${word_regexp}" \
@@ -61,7 +67,7 @@ blobs = { ${python_blobs} }
 ${if:-if} blob.original_id not in blobs:
     return
 
-blob.data = re.sub(br"${python_search}", b"${replace}", blob.data, ${python_flags})
+blob.data = ${python_final_line}
 EOF
 )"
 
