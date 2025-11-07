@@ -17,7 +17,7 @@ Usage:
   ${cmd} <search> <replacement> [-i] [-w]
 
 Description:
-  Perform a search-and-replace on historical file paths (added/renamed/deleted) across the full history.
+  Perform a search-and-replace on historical file paths across the full history.
 
 Arguments:
   <search>          Pattern to replace in file paths.

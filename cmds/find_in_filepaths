@@ -17,7 +17,7 @@ Usage:
   ${cmd} <search> [-i] [-w]
 
 Description:
-  Search historical file paths (added/renamed/deleted) across the full history.
+  Search historical file paths across the full history.
 
   At the end, prints statistics: total matches found.
 

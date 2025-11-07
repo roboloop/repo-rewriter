@@ -19,7 +19,7 @@ Usage:
   ${cmd}
 
 Description:
-  Create signatures for all commits using the key configured in:
+  Create signatures for all commits using the key configured in git config.
   git config user.signingkey
 
   Works only to repository with linear history.

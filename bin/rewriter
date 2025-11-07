@@ -9,12 +9,64 @@ ROOT_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 ! command -v git-filter-repo &> /dev/null && die "git-filter-repo not found"
 ! command -v column &> /dev/null && die "column not found"
 
+print_help() {
+  local cmd="${CMD:-}"
+  [[ -z "${cmd}" ]] && cmd="$0"
+
+  cat <<EOF
+Usage:
+  ${cmd} <subcommand> [options]
+
+Description:
+  Git history rewriting toolkit — a collection of utilities for searching,
+  replacing, rewriting, and analyzing repository contents.
+
+Groups & Subcommands:
+
+  History exploration:
+    find_in_blobs          Search all blob contents across the full history.
+    find_in_commits        Search commit subjects and bodies across the full history.
+    find_in_filepaths      Search historical file paths across the full history.
+    print_authors          Print the list of unique commit authors from the entire Git history.
+    print_files            Print all file paths currently tracked in the repository.
+
+  Automated rewriting:
+    drop_files             Drop all files matching glob patterns.
+    replace_in_blobs       Perform a search-and-replace over blob contents across the full history.
+    replace_in_commits     Perform a search-and-replace in commit messages across the full history.
+    replace_in_filepaths   Perform a search-and-replace on historical file paths across the full history.
+    rewrite_authors        Rewrite commit authors across the entire history using a mailmap file.
+    rewrite_timestamps     Rewrite all commit timestamps to UTC (preserving relative order).
+    sign_commits           Create signatures for all commits using the key configured in git config.
+
+  Interactive history rebuild:
+    rewrite_history        Rewrite a Git repository's history in a controlled, step-by-step workflow.
+
+  Utilities:
+    make_backup            Make a backup copy of the repository.
+    merge                  Internal helper that wraps 'git merge-one-file' and forwards all arguments.
+
+Options:
+  --help             Show help for the entrypoint or subcommand.
+
+Environment:
+  REPO_DIR               (required) Path to the target repository.
+
+Examples:
+  ${cmd} --help
+  REPO_DIR="\$(pwd)" ${cmd} drop_files --help
+  REPO_DIR="\$(pwd)" ${cmd} rewrite_history init
+EOF
+}
+
 main() {
-  test "$#" -lt 1 && die "No command passed"
+  has_flag "--help" "$@" && print_help && exit 0
+
+  test "$#" -lt 1 && print_help && die "No command passed"
   local cmd="$1"; shift
   local cmd_path="${ROOT_DIR}/cmds/${cmd}"
 
-  ! test -f "${cmd_path}" && die "Command '${cmd}' not found"
+  ! test -f "${cmd_path}" && print_help && die "Command '${cmd}' not found"
 
   CMD="$0 ${cmd}" exec "${cmd_path}" "$@"
 }
