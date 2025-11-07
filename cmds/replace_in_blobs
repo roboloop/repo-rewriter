@@ -2,12 +2,41 @@
 
 set -Eeuo pipefail
 
-SCRIPT_DIR=$(CDPATH="" cd -- "$(dirname -- "$0")" && pwd)
-ROOT_DIR=$(CDPATH="" cd -- "${SCRIPT_DIR}/.." && pwd)
+SCRIPT_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
+ROOT_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 . "${ROOT_DIR}/lib/common"
 
-GIT() {
-  git -C "${REPO_DIR}" "$@"
+REPO_DIR="${REPO_DIR:?REPO_DIR is not set}"
+
+print_help() {
+  local cmd="${CMD:-}"
+  [[ -z "${cmd}" ]] && cmd="$0"
+
+  cat <<EOF
+Usage:
+  ${cmd} <search> <replacement> [-i] [-w] [-p=<pathspec>...]
+
+Description:
+  Perform a search-and-replace over blob contents across the full history.
+
+Arguments:
+  <search>          Pattern to replace.
+  <replacement>     Replacement text.
+
+Options:
+  -i                Ignore case.
+  -w                Match the search term as a whole word (word-regex).
+  -p=<pathspec>     Restrict changes to paths matching <pathspec>. May be repeated.
+  --help            Show this help message and exit.
+
+Environment:
+  REPO_DIR          (required) Path to the target repository.
+
+Examples:
+  REPO_DIR="\$(pwd)" ${cmd} 'SECRET_TOKEN' 'REDACTED_TOKEN'
+  REPO_DIR="\$(pwd)" ${cmd} 'secret_token' 'REDACTED_TOKEN' -i -w
+  REPO_DIR="\$(pwd)" ${cmd} 'TODO ' 'TODO: ' -p='*.go' -p='docs/**'
+EOF
 }
 
 # Produces in format commit:filepath:count (sorted by commit, filepath)
@@ -28,7 +57,9 @@ file_blobs() {
   | uniq
 }
 
-rewrite_in_trees() {
+main() {
+  has_flag "--help" "$@" && print_help && exit 0
+
   local search="$1"
   local replace="$2"
   local ignore_case=
@@ -73,3 +104,5 @@ EOF
 
   GIT filter-repo --force --blob-callback "${python_code}"
 }
+
+main "$@"

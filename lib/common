@@ -62,3 +62,7 @@ is_git_repo() {
 
   return 1
 }
+
+GIT() {
+  git -C "${REPO_DIR:?REPO_DIR is not set}" "$@"
+}

@@ -2,12 +2,45 @@
 
 set -Eeuo pipefail
 
+SCRIPT_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
+ROOT_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
+. "${ROOT_DIR}/lib/common"
+
 REPO_DIR="${REPO_DIR:?REPO_DIR is not set}"
 
-merge() {
-  printf "[merge] %s %s %s %s %s %s %s\n" "$@" >&2
+print_help() {
+  local cmd="${CMD:-}"
+  [[ -z "${cmd}" ]] && cmd="$0"
 
-  git -C "${REPO_DIR}" merge-one-file "$@"
+  cat <<EOF
+Usage:
+  ${cmd} <merge-one-file-args>
+
+Description:
+  Internal helper that wraps 'git merge-one-file' and forwards all arguments.
+  Intended for programmatic use, not direct invocation.
+
+Arguments:
+  <merge-one-file-args>
+                    Arguments accepted by 'git merge-one-file'.
+
+Options:
+  --help            Show this help message and exit.
+
+Environment:
+  REPO_DIR          (required) Path to the target repository.
+
+Examples:
+  REPO_DIR="\$(pwd)" ${cmd} <merge-one-file-args>
+EOF
 }
 
-merge "$@"
+main() {
+  has_flag "--help" "$@" && print_help && exit 0
+
+  printf "[merge] %s %s %s %s %s %s %s\n" "$@" >&2
+
+  GIT merge-one-file "$@"
+}
+
+main "$@"

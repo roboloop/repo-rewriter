@@ -2,17 +2,84 @@
 
 set -Eeuo pipefail
 
-SCRIPT_DIR=$(CDPATH="" cd -- "$(dirname -- "$0")" && pwd)
-ROOT_DIR=$(CDPATH="" cd -- "${SCRIPT_DIR}/.." && pwd)
+SCRIPT_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
+ROOT_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 . "${ROOT_DIR}/lib/common"
-. "${ROOT_DIR}/lib/copy"
 
-make_backup() {
-  [[ "$#" -lt 1 ]] && die "Usage: make_backup <repo_dir>"
-  [[ ! -d "$1" ]] && die "'$1' is not a valid directory"
+: "${REPO_DIR:?REPO_DIR is not set}"
+: "${BACKUP_DIR:=${ROOT_DIR}/backups}"
+
+print_help() {
+  local cmd="${CMD:-}"
+  [[ -z "${cmd}" ]] && cmd="$0"
+
+  cat <<EOF
+Usage:
+  ${cmd} [--only-git]
+
+Description:
+  Make a backup copy of the repository.
+
+Options:
+  --only-git        Backup only .git directory.
+  --help            Show this help message and exit.
+
+Environment:
+  REPO_DIR          (required) Path to the target repository.
+  BACKUP_DIR        (optional) Path to the backup directory.
+
+Examples:
+  REPO_DIR="\$(pwd)" ${cmd}
+  REPO_DIR="\$(pwd)" ${cmd} --only-git
+  REPO_DIR="\$(pwd)" BACKUP_DIR="/path/to/backups" ${cmd}
+EOF
+}
+
+format_src_dir() {
+  local src_dir
+  src_dir="$1"; shift
+
+  local git_dir=
+  has_flag "--only-git" "$@" && git_dir="/.git"
+
+  src_dir="$(realpath "${src_dir}")${git_dir}"
+
+  printf '%s' "${src_dir}"
+}
+
+format_dst_dir() {
+  local src_dir
+  src_dir="$1"; shift
+
+  local git_suffix=
+  has_flag "--only-git" "$@" && git_suffix="-git"
+
+  local repo_name date_suffix dst_dir
+  repo_name="$(basename "${src_dir}")"
+  date_suffix="-$(date +"%Y%m%d-%H%M%S")"
+  dst_dir="${BACKUP_DIR}/${repo_name}${date_suffix}${git_suffix}"
+
+  printf '%s' "${dst_dir}"
+}
+
+make_copy() {
+  local src_dir dst_dir
+  src_dir="$1"
+  dst_dir="$2"
+
+  info "Making copy repo ${src_dir} to ${dst_dir}"
+  mkdir -p "${BACKUP_DIR}"
+  cp -r "${src_dir}" "${dst_dir}"
+}
+
+main() {
+  has_flag "--help" "$@" && print_help && exit 0
 
   local src_dir dst_dir
-  src_dir="$1"; shift
-  dst_dir="$(copy_dir "${src_dir}")"
+  src_dir="$(format_src_dir "${REPO_DIR}" "$@")"
+  dst_dir="$(format_dst_dir "${REPO_DIR}" "$@")"
+
   make_copy "${src_dir}" "${dst_dir}" "$@"
 }
+
+main "$@"

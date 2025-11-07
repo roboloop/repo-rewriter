@@ -2,11 +2,12 @@
 
 set -Eeuo pipefail
 
-SCRIPT_DIR=$(CDPATH="" cd -- "$(dirname -- "$0")" && pwd)
-ROOT_DIR=$(CDPATH="" cd -- "${SCRIPT_DIR}/.." && pwd)
+SCRIPT_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
+ROOT_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 . "${ROOT_DIR}/lib/common"
 
 REPO_DIR="${REPO_DIR:?REPO_DIR is not set}"
+
 REPO_REWRITER_DIR="${REPO_DIR}/.git/repo-rewriter"
 HISTORY_CONFIG="${REPO_REWRITER_DIR}/history_config"
 
@@ -34,6 +35,97 @@ fi
 
 GIT() {
   git -C "${REPO_DIR}" "$@"
+}
+
+print_help() {
+  local cmd="${CMD:-}"
+  [[ -z "${cmd}" ]] && cmd="$0"
+
+  cat <<EOF
+Usage:
+  ${cmd} <command> [options]
+
+Description:
+  Rewrite a Git repository's history in a controlled, step-by-step workflow.
+  The current implementation supports repositories with a linear history only.
+  Progress and state are stored under: .git/repo-rewriter
+
+Arguments:
+  (Most commands do not take positional arguments; all state is derived
+   from the internal config and the target repository.)
+
+Commands:
+  init              Initialize the rewriting session from the original root.
+  pick              Apply the next original commit into the working tree (3-way merge).
+  commit            Create a rewritten commit from the current index/WT (only in 'picked' state).
+  skip              Skip the current original commit and clean the working tree.
+  rollback          Move one step back in the process (original and/or rewritten history).
+  status            Show current state, progress (N/Total), SHA, and original message.
+  finalize          Switch the original head ref to the rewritten history and clean up.
+  abort             Restore the repository to the original state and remove all rewriter data.
+
+Common Options:
+  --help            Show this help message and exit.
+
+Per-command Options:
+  init, pick, commit, skip, rollback, finalize:
+    --dry-run       Validate preconditions only; do not change anything.
+
+  rollback:
+    --not-rewritten Do not move the rewritten history back (original progress only).
+
+Environment:
+  REPO_DIR          (required) Absolute or relative path to the target repository.
+  COMMIT_MESSAGE    (optional, commit) Override the original commit message when
+                    creating the rewritten commit; author/committer/timestamps
+                    are preserved from the original.
+
+Workflow:
+  States: picked ⇄ committed
+             ⇅
+          skipped
+
+  Typical flow:
+    init → commit → pick → skip → pick → commit → ... → finalize
+             ↑              ↑              ↑
+          rollback       rollback       rollback
+    abort can be used at any time to restore the original state.
+
+Notes:
+  - 'init' verifies: linear history, clean working tree, and reachable root.
+  - 'pick' materializes the next original commit via a 3-way merge into WT/index.
+  - 'commit' records the current index as the next rewritten commit, carrying over
+    author/committer identities and dates from the matched original commit.
+  - 'skip' advances the original progression and cleans WT/index accordingly.
+  - 'rollback' steps back one original commit; optionally also moves the rewritten ref.
+  - 'finalize' moves the original head to the rewritten ref, reattaches HEAD, and cleans up.
+
+Examples:
+  # Start a process (dry-run first), it also picks the first commit:
+  REPO_DIR="\$(pwd)" ${cmd} init --dry-run
+  REPO_DIR="\$(pwd)" ${cmd} init
+
+  # Commit the picked changes (preserving original metadata):
+  REPO_DIR="\$(pwd)" ${cmd} commit
+  REPO_DIR="\$(pwd)" COMMIT_MESSAGE="Tweak message if needed" ${cmd} commit
+
+  # Pick the next original commit and inspect status:
+  REPO_DIR="\$(pwd)" ${cmd} pick
+  REPO_DIR="\$(pwd)" ${cmd} status
+
+  # Skip the current original commit:
+  REPO_DIR="\$(pwd)" ${cmd} skip
+
+  # Roll back one step (do not move rewritten history):
+  REPO_DIR="\$(pwd)" ${cmd} rollback --not-rewritten
+
+  # Finalize after all steps are done:
+  REPO_DIR="\$(pwd)" ${cmd} finalize
+
+  # Abort at any time to restore the original state:
+  REPO_DIR="\$(pwd)" ${cmd} abort
+
+EOF
 }
 
 list_of_ignored() {
@@ -447,6 +539,7 @@ pre_finalize() {
 
 finalize() {
   pre_finalize
+  has_flag "--dry-run" "$@" && exit 0
 
   info "Moving ${ORIGINAL_HEAD} to the rewritten commit."
   GIT update-ref "${ORIGINAL_HEAD}" "${REWRITTEN_HEAD}"
@@ -483,14 +576,15 @@ abort() {
   GIT update-ref -d "${REWRITTEN_HEAD}"
 }
 
-rewrite_history() {
+main() {
+  has_flag "--help" "$@" && print_help && exit 0
+
   [[ $# -lt 1 ]] && die "Usage: REPO_DIR=<repo_dir> rewrite_history <cmd>."
   [[ ! -d "${REPO_DIR}" ]] && die "'${REPO_DIR}' is not a valid directory."
   ! is_git_repo "${REPO_DIR}" && die "'${REPO_DIR}' is not a git repository."
 
   local cmd="$1"; shift
 
-  # TODO: flow how to work
   case "${cmd}" in
     init) init "$@" ;;
     pick) pick "$@" ;;
@@ -504,3 +598,5 @@ rewrite_history() {
     *) die "Command ${cmd} not found." ;;
   esac
 }
+
+main "$@"

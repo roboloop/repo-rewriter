@@ -2,12 +2,40 @@
 
 set -Eeuo pipefail
 
-SCRIPT_DIR=$(CDPATH="" cd -- "$(dirname -- "$0")" && pwd)
-ROOT_DIR=$(CDPATH="" cd -- "${SCRIPT_DIR}/.." && pwd)
+SCRIPT_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
+ROOT_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 . "${ROOT_DIR}/lib/common"
 
-GIT() {
-  git -C "${REPO_DIR}" "$@"
+REPO_DIR="${REPO_DIR:?REPO_DIR is not set}"
+
+print_help() {
+  local cmd="${CMD:-}"
+  [[ -z "${cmd}" ]] && cmd="$0"
+
+  cat <<EOF
+Usage:
+  ${cmd} <search> [-i] [-w]
+
+Description:
+  Search commit subjects and bodies across the full history.
+
+  At the end, prints statistics: total commits scanned and total matches found.
+
+Arguments:
+  <search>          Literal pattern to find.
+
+Options:
+  -i                Ignore case.
+  -w                Match the search term as a whole word (word-regex).
+  --help            Show this help message and exit.
+
+Environment:
+  REPO_DIR          (required) Path to the target repository.
+
+Examples:
+  REPO_DIR="\$(pwd)" ${cmd} 'fixup!'
+  REPO_DIR="\$(pwd)" ${cmd} 'BREAKING' -i -w
+EOF
 }
 
 grep_commits() {
@@ -16,7 +44,9 @@ grep_commits() {
   GIT --no-pager log --all ${grep_flags}
 }
 
-search_in_commits() {
+main() {
+  has_flag "--help" "$@" && print_help && exit 0
+
   local search="$1"
 
   local ignore_case=
@@ -32,7 +62,7 @@ search_in_commits() {
   grep_commits --grep="${grep}" ${ignore_case} ${perl_regexp} --color=always
 
   # Calculate stats
-  local shas total_commits=0 total_found=0
+  local total_commits=0 total_found=0
   total_commits="$(grep_commits --pretty=format:%H --grep="${grep}" ${ignore_case} ${perl_regexp} | wc -l | awk '{print $1}')"
   total_found="$(grep_commits --pretty=format:%B --grep="${grep}" ${ignore_case} ${perl_regexp} \
     | grep -o "${grep}" ${ignore_case} ${word_regexp} \
@@ -42,3 +72,5 @@ search_in_commits() {
   echo "Total commits: ${total_commits}"
   echo "Total found: ${total_found}"
 }
+
+main "$@"

@@ -2,16 +2,39 @@
 
 set -Eeuo pipefail
 
-SCRIPT_DIR=$(CDPATH="" cd -- "$(dirname -- "$0")" && pwd)
-ROOT_DIR=$(CDPATH="" cd -- "${SCRIPT_DIR}/.." && pwd)
+SCRIPT_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
+ROOT_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 . "${ROOT_DIR}/lib/common"
-. "${ROOT_DIR}/lib/copy"
+
+REPO_DIR="${REPO_DIR:?REPO_DIR is not set}"
 
 DEFAULT_HEAD="${DEFAULT_HEAD:-refs/heads/main}"
 
-GIT() {
-  git -C "${REPO_DIR}" "$@"
+print_help() {
+  local cmd="${CMD:-}"
+  [[ -z "${cmd}" ]] && cmd="$0"
+
+  cat <<EOF
+Usage:
+  ${cmd}
+
+Description:
+  Create signatures for all commits using the key configured in:
+  git config user.signingkey
+
+  Works only to repository with linear history.
+
+Options:
+  --help            Show this help message and exit.
+
+Environment:
+  REPO_DIR          (required) Path to the target repository.
+
+Examples:
+  REPO_DIR="\$(pwd)" ${cmd}
+EOF
 }
+
 
 commit_tree() {
   local signing_key="$1"
@@ -48,7 +71,9 @@ commit_tree() {
   echo "${commit_sha}"
 }
 
-sign_commits() {
+main() {
+  has_flag "--help" "$@" && print_help && exit 0
+
   if [[ $(GIT rev-list --min-parents=2 "${DEFAULT_HEAD}" | wc -l) -ne 0 ]]; then
     die "History is not linear."
   fi
@@ -67,3 +92,5 @@ sign_commits() {
 
   GIT update-ref "${current_branch}" "${parent_sha}"
 }
+
+main "$@"

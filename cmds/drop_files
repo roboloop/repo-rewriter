@@ -2,16 +2,44 @@
 
 set -Eeuo pipefail
 
-SCRIPT_DIR=$(CDPATH="" cd -- "$(dirname -- "$0")" && pwd)
-ROOT_DIR=$(CDPATH="" cd -- "${SCRIPT_DIR}/.." && pwd)
+SCRIPT_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
+ROOT_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 . "${ROOT_DIR}/lib/common"
-. "${ROOT_DIR}/lib/copy"
 
-drop_files() {
-  local repo_dir="$1"; shift
+REPO_DIR="${REPO_DIR:?REPO_DIR is not set}"
+
+print_help() {
+  local cmd="${CMD:-}"
+  [[ -z "${cmd}" ]] && cmd="$0"
+
+  cat <<EOF
+Usage:
+  ${cmd} <glob_pattern>...
+
+Description:
+  Drop all files matching glob patterns.
+
+Arguments:
+  <glob_pattern>    List of glob patterns.
+
+Environment:
+  REPO_DIR          (required) Path to the target repository.
+
+Examples:
+  REPO_DIR="\$(pwd)" ${cmd} .env
+  REPO_DIR="\$(pwd)" ${cmd} '*.a' '*.o'
+EOF
+}
+
+main() {
+  has_flag "--help" "$@" && print_help && exit 0
+
+  test "$#" -lt 1 &&  die "No glob patterns passed."
 
   for arg in "$@"; do
     info "Applying glob ${arg}"
-    git -C "${repo_dir}" filter-repo --invert-paths --path-glob "${arg}"
+    GIT filter-repo --invert-paths --path-glob "${arg}"
   done
 }
+
+main "$@"

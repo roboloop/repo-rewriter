@@ -2,12 +2,43 @@
 
 set -Eeuo pipefail
 
-SCRIPT_DIR=$(CDPATH="" cd -- "$(dirname -- "$0")" && pwd)
-ROOT_DIR=$(CDPATH="" cd -- "${SCRIPT_DIR}/.." && pwd)
-. "${ROOT_DIR}/cmds/print_authors"
+SCRIPT_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
+ROOT_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 . "${ROOT_DIR}/lib/common"
 
-rewrite_authors() {
+REPO_DIR="${REPO_DIR:?REPO_DIR is not set}"
+
+PRINT_AUTHORS_CMD="${ROOT_DIR}/cmds/print_authors"
+
+print_help() {
+  local cmd="${CMD:-}"
+  [[ -z "${cmd}" ]] && cmd="$0"
+
+  cat <<EOF
+Usage:
+  ${cmd} <mailmap_path>
+
+Description:
+  Rewrite commit authors across the entire history using a mailmap file.
+  The mailmap must contain old/new identity pairs in standard Git mailmap format.
+
+Arguments:
+  <mailmap_path>    Path to a mailmap file with author/committer mappings.
+
+Options:
+  --help            Show this help message and exit.
+
+Environment:
+  REPO_DIR          (required) Path to the target repository.
+
+Examples:
+  REPO_DIR="\$(pwd)" ${cmd} ./authors.mailmap
+EOF
+}
+
+main() {
+  has_flag "--help" "$@" && print_help && exit 0
+
   [[ "$#" -lt 2 ]] && die "Usage: rewrite_authors <repo_dir> <mailmap_path>"
   [[ ! -d "$1" ]] && die "'$1' is not a valid directory"
   [[ ! -e "$2" && ! -r "$2" ]] && die "'$2' is not a valid file path"
@@ -19,7 +50,7 @@ rewrite_authors() {
   is_git_repo "${repo_dir}" || die "'${repo_dir}' is not a git repository"
 
   local list changed="" skipped=""
-  list="$(print_authors "${repo_dir}")"
+  list="$(exec "${PRINT_AUTHORS_CMD}")"
 
   local mailmap
   mailmap="$(cat "${mailmap_path}")"
@@ -59,8 +90,10 @@ rewrite_authors() {
       echo -e "${changed}"
     ) | column -t -s $'\t' >&2
   else
-    echo "no emails will be changed" >&2 && exit 1
+    echo "no authors will be changed" >&2 && exit 1
   fi
 
-  git -C "${repo_dir}" filter-repo --force --mailmap <(printf "%s" "${mailmap}")
+  GIT filter-repo --force --mailmap <(printf "%s" "${mailmap}")
 }
+
+main "$@"

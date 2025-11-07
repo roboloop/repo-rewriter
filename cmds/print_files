@@ -2,13 +2,38 @@
 
 set -Eeuo pipefail
 
-SCRIPT_DIR=$(CDPATH="" cd -- "$(dirname -- "$0")" && pwd)
-ROOT_DIR=$(CDPATH="" cd -- "${SCRIPT_DIR}/.." && pwd)
+SCRIPT_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
+ROOT_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 . "${ROOT_DIR}/lib/common"
 
-print_files() {
-  local repo_dir
-  repo_dir="$1"
+REPO_DIR="${REPO_DIR:?REPO_DIR is not set}"
 
-  git -C "${repo_dir}" log --pretty=format: --name-only --diff-filter=ACDMRT | sort -u
+print_help() {
+  local cmd="${CMD:-}"
+  [[ -z "${cmd}" ]] && cmd="$0"
+
+  cat <<EOF
+Usage:
+  ${cmd}
+
+Description:
+  Print all file paths currently tracked in the repository.
+
+Options:
+  --help            Show this help message and exit.
+
+Environment:
+  REPO_DIR          (required) Path to the target repository.
+
+Examples:
+  REPO_DIR="\$(pwd)" ${cmd}
+EOF
 }
+
+main() {
+  has_flag "--help" "$@" && print_help && exit 0
+
+  GIT log --pretty=format: --name-only --diff-filter=ACDMRT | sort -u
+}
+
+main "$@"

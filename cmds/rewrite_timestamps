@@ -2,16 +2,41 @@
 
 set -Eeuo pipefail
 
-SCRIPT_DIR=$(CDPATH="" cd -- "$(dirname -- "$0")" && pwd)
-ROOT_DIR=$(CDPATH="" cd -- "${SCRIPT_DIR}/.." && pwd)
-. "${ROOT_DIR}/cmds/print_authors"
+SCRIPT_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
+ROOT_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 . "${ROOT_DIR}/lib/common"
 
-rewrite_timestamps() {
+REPO_DIR="${REPO_DIR:?REPO_DIR is not set}"
+
+print_help() {
+  local cmd="${CMD:-}"
+  [[ -z "${cmd}" ]] && cmd="$0"
+
+  cat <<EOF
+Usage:
+  ${cmd}
+
+Description:
+  Rewrite all commit timestamps to UTC (preserving relative order).
+
+Options:
+  --help            Show this help message and exit.
+
+Environment:
+  REPO_DIR          (required) Path to the target repository.
+
+Examples:
+  REPO_DIR="\$(pwd)" ${cmd}
+EOF
+}
+
+main() {
+  has_flag "--help" "$@" && print_help && exit 0
+
   local repo_dir
   repo_dir="$1"; shift
   repo_dir=$(realpath "${repo_dir}")
-  is_git_repo "${repo_dir}"
+  is_git_repo "${repo_dir}" || die "'${repo_dir}' is not a git repository"
 
   local python_code
   python_code="$(cat <<EOF
@@ -24,7 +49,9 @@ EOF
 
   info "Making changes of repo: ${repo_dir}"
 
-  git -C "${repo_dir}" filter-repo --force --commit-callback "${python_code}"
+  GIT filter-repo --force --commit-callback "${python_code}"
 
   info "Check the result ${repo_dir}"
 }
+
+main "$@"

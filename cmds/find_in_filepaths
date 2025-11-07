@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
+ROOT_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
+. "${ROOT_DIR}/lib/common"
+
+REPO_DIR="${REPO_DIR:?REPO_DIR is not set}"
+
+print_help() {
+  local cmd="${CMD:-}"
+  [[ -z "${cmd}" ]] && cmd="$0"
+
+  cat <<EOF
+Usage:
+  ${cmd} <search> [-i] [-w]
+
+Description:
+  Search historical file paths (added/renamed/deleted) across the full history.
+
+  At the end, prints statistics: total matches found.
+
+Arguments:
+  <search>          Literal pattern to find.
+
+Options:
+  -i                Ignore case.
+  -w                Match the search term as a whole word (word-regex).
+  --help            Show this help message and exit.
+
+Environment:
+  REPO_DIR          (required) Path to the target repository.
+
+Examples:
+  REPO_DIR="\$(pwd)" ${cmd} '.env'
+  REPO_DIR="\$(pwd)" ${cmd} 'path/to/file' -i -w
+EOF
+}
+
+grep_filepaths() {
+  local search="$1"
+  shift 1
+  local grep_flags="$@"
+
+  GIT --no-pager log --all --name-only --pretty= \
+  | sort \
+  | uniq \
+  | grep ${grep_flags} "${search}" || true
+}
+
+main() {
+  has_flag "--help" "$@" && print_help && exit 0
+
+  local search="$1"
+  local ignore_case=
+  local word_regexp=
+
+  has_flag "-i" "$@" && ignore_case="--ignore-case"
+  has_flag "-w" "$@" && word_regexp="--word-regexp"
+
+  grep_filepaths "${search}" ${ignore_case} ${word_regexp} --color=always
+
+  # Calculate stats
+  local total_found=0
+  total_found="$(grep_filepaths "${search}" ${ignore_case} ${word_regexp} | wc -l | awk '{print $1}')"
+  echo "Total found: "${total_found}
+}
+
+main "$@"

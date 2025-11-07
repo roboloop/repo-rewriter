@@ -2,15 +2,49 @@
 
 set -Eeuo pipefail
 
-SCRIPT_DIR=$(CDPATH="" cd -- "$(dirname -- "$0")" && pwd)
-ROOT_DIR=$(CDPATH="" cd -- "${SCRIPT_DIR}/.." && pwd)
+SCRIPT_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
+ROOT_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 . "${ROOT_DIR}/lib/common"
+
+REPO_DIR="${REPO_DIR:?REPO_DIR is not set}"
 
 OFFSET="---"
 OFFSET_LEN=3
 
-GIT() {
-  git -C "${REPO_DIR}" "$@"
+print_help() {
+  local cmd="${CMD:-}"
+  [[ -z "${cmd}" ]] && cmd="$0"
+
+  cat <<EOF
+Usage:
+  ${cmd} <search> [-i] [-w] [-C=<num>] [-p=<pathspec>...]
+
+Description:
+  Search all blob contents across the full history. Results are reported as
+  "filepath+blob" pairs deduplicated to the oldest commit where they appear.
+  To reduce noise, a match is shown only if the diff around that blob revision
+  actually contains the searched pattern.
+
+  At the end, prints statistics: total files scanned and total matches found.
+
+Arguments:
+  <search>          Literal pattern to find.
+
+Options:
+  -i                Ignore case.
+  -w                Match the search term as a whole word (word-regex).
+  -C=<num>          Show <num> context lines before and after each match (default: 2).
+  -p=<pathspec>     Restrict search to paths matching <pathspec>. May be repeated.
+  --help            Show this help message and exit.
+
+Environment:
+  REPO_DIR          (required) Path to the target repository.
+
+Examples:
+  REPO_DIR="\$(pwd)" ${cmd} 'SECRET_TOKEN'
+  REPO_DIR="\$(pwd)" ${cmd} 'secret_token' -i -w
+  REPO_DIR="\$(pwd)" ${cmd} 'TODO' -C=5 -p='*.go' -p='docs/**'
+EOF
 }
 
 # Produces in format commit:filepath:count (sorted by commit, filepath)
@@ -20,6 +54,7 @@ grep_commits() {
   shift 2
   local grep_flags="$@"
 
+  # shellcheck disable=SC2046
   GIT --no-pager grep --no-color -I -l ${grep_flags} -- "${search}" $(GIT rev-list --all) -- ${pathspec} || true
 }
 
@@ -99,7 +134,9 @@ print_lines() {
   done
 }
 
-search_in_trees() {
+main() {
+  has_flag "--help" "$@" && print_help && exit 0
+
   local search="$1"; shift
   local ignore_case=
   local word_regexp=
@@ -145,3 +182,5 @@ search_in_trees() {
     echo "Total files: ${total_files}"
     echo "Total found: ${total_found}"
 }
+
+main "$@"

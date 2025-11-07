@@ -2,31 +2,21 @@
 
 set -Eeuo pipefail
 
-# Entry point to the all set of scripts
-#
-# Usage:
-#   ./rewriter <command> [arguments]
-#
-# The commands are:
-#   ./rewriter rewrite_timestamps <repo_dir>              normalize all commit's timestamps to UTC
-#   ./rewriter rewrite_authors <repo_dir> <mailmap>       normalize all commit's authors
-#   ./rewriter rewrite_history                            rebuild all history commit by commit
-#   ./rewriter show_authors <repo_dir>                    print all authors
-#   ./rewriter make_backup <repo_dir>                     make backup
-#   ./rewriter search_in_commits <text>                   search in commits
-#   ./rewriter search_in_filepaths <text>                 search in filepaths
-#   ./rewriter search_in_trees <text>                     search in trees
+SCRIPT_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
+ROOT_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
+. "${ROOT_DIR}/lib/common"
 
-command -v git-filter-repo &> /dev/null || ( echo "git-filter-repo not found" >&2 && exit 1 )
-command -v column &> /dev/null || ( echo "column not found" >&2 && exit 1 )
+! command -v git-filter-repo &> /dev/null && die "git-filter-repo not found"
+! command -v column &> /dev/null && die "column not found"
 
-SCRIPT_DIR=$(CDPATH="" cd -- "$(dirname -- "$0")" && pwd)
-ROOT_DIR=$(CDPATH="" cd -- "${SCRIPT_DIR}/.." && pwd)
+main() {
+  test "$#" -lt 1 && die "No command passed"
+  local cmd="$1"; shift
+  local cmd_path="${ROOT_DIR}/cmds/${cmd}"
 
-[[ $# -lt 1 ]] && echo "No command passed" >&2 && exit 1
-cmd="$1"; shift
-commands="$(find "${ROOT_DIR}/cmds" -type f -print | sed -E 's|^.*/([^/]+)$|\1|')"
-! grep -Fxq "${cmd}" <<< "${commands}" && echo "Command '${cmd}' not found" && exit 1
+  ! test -f "${cmd_path}" && die "Command '${cmd}' not found"
 
-. "${ROOT_DIR}/cmds/${cmd}"
-"${cmd}" "$@"
+  CMD="$0 ${cmd}" exec "${cmd_path}" "$@"
+}
+
+main "$@"
