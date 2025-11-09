@@ -60,15 +60,18 @@ EOF
 }
 
 main() {
-  has_flag "--help" "$@" && print_help && exit 0
-
   test "$#" -lt 1 && print_help && die "No command passed"
-  local cmd="$1"; shift
+  local cmd="$1"
   local cmd_path="${ROOT_DIR}/cmds/${cmd}"
 
-  ! test -f "${cmd_path}" && print_help && die "Command '${cmd}' not found"
+  if test -f "${cmd_path}"; then
+    shift
+    CMD="$0 ${cmd}" exec "${cmd_path}" "$@"
+    return 0
+  fi
 
-  CMD="$0 ${cmd}" exec "${cmd_path}" "$@"
+  print_help
+  has_flag "--help" "$@" && exit 0 || die "Command '${cmd}' not found"
 }
 
 main "$@"

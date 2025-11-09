@@ -20,7 +20,7 @@ Description:
   Perform a search-and-replace on historical file paths across the full history.
 
 Arguments:
-  <search>          Pattern to replace in file paths.
+  <search>          Regexp pattern to replace in file paths.
   <replacement>     Replacement text.
 
 Options:
@@ -34,6 +34,7 @@ Environment:
 Examples:
   REPO_DIR="\$(pwd)" ${cmd} 'subdir/project/' 'project/'
   REPO_DIR="\$(pwd) "${cmd} 'tmp' 'temp' -i -w
+  REPO_DIR="\$(pwd) "${cmd} 'secrets/([a-z]+)\.env' '\\\\1.env'
 EOF
 }
 
@@ -54,12 +55,14 @@ main() {
   [[ -n "${ignore_case}" ]] && python_flags="flags=re.IGNORECASE"
   [[ -n "${word_regexp}" ]] && python_search="\\b${python_search}\\b"
 
+# | sed '/^[^"]/s/.*/"&"/' \
   local python_filepaths
   python_filepaths="$(GIT --no-pager log --all --name-only --pretty= \
+    | sed -E 's/^"(.+)"$/\1/' \
     | sort \
     | uniq \
-    | grep --color=never ${ignore_case} ${word_regexp} "${search}" \
-    | sed -E 's/^(.+)$/b"\1",/' \
+    | grep -E --color=never ${ignore_case} ${word_regexp} "${search}" \
+    | sed -E 's/^(.+)$/"\1",/' \
     | paste -sd' ' - || true
   )"
 
@@ -69,10 +72,11 @@ main() {
   python_code="$(cat <<EOF
 import re, sys
 filepaths = { ${python_filepaths} }
-${if:-if} filename not in filepaths:
+decoded = filename.decode('utf-8', 'surrogateescape')
+${if:-if} decoded not in filepaths:
     return filename
 
-return re.sub(br"${python_search}", b"${replace}", filename, ${python_flags})
+return re.sub(r"${python_search}", "${replace}", decoded, ${python_flags}).encode('utf-8', 'surrogateescape')
 EOF
 )"
 

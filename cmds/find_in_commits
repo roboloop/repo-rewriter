@@ -22,7 +22,7 @@ Description:
   At the end, prints statistics: total commits scanned and total matches found.
 
 Arguments:
-  <search>          Literal pattern to find.
+  <search>          Regexp pattern to find.
 
 Options:
   -i                Ignore case.
@@ -35,37 +35,41 @@ Environment:
 Examples:
   REPO_DIR="\$(pwd)" ${cmd} 'fixup!'
   REPO_DIR="\$(pwd)" ${cmd} 'BREAKING' -i -w
+  REPO_DIR="\$(pwd)" ${cmd} '^[a-z]+\$'
 EOF
 }
 
 grep_commits() {
+  local search="$1"; shift
   local grep_flags="$@"
 
-  GIT --no-pager log --all ${grep_flags}
+  GIT --no-pager log --all --grep="${search}" ${grep_flags}
 }
 
 main() {
   has_flag "--help" "$@" && print_help && exit 0
 
   local search="$1"
-
   local ignore_case=
   local word_regexp=
-  local perl_regexp=
-  local grep="${search}"
+  # --perl-regexp must not be used, but for some reason --extended-regexp doesn't work properly
+  # Use --extended-regexp features and DO NOT use --perl-regexp features
+  local perl_regexp="--perl-regexp"
 
+  shift 1
   has_flag "-i" "$@" && ignore_case="-i"
-  has_flag "-w" "$@" && word_regexp="--word-regexp" && perl_regexp="--perl-regexp"
+  has_flag "-w" "$@" && word_regexp="--word-regexp"
 
-  [[ -n "${word_regexp}" ]] && grep="$(printf '\\b\\Q%s\\E\\b' "${search}")"
+  # git log doesn't support --word-regexp flag, so we do it ourselves
+  [[ -n "${word_regexp}" ]] && search="$(printf '\\b%s\\b' "${search}")"
 
-  grep_commits --grep="${grep}" ${ignore_case} ${perl_regexp} --color=always
+  grep_commits "${search}" ${ignore_case} ${perl_regexp} --color=always
 
   # Calculate stats
-  local total_commits=0 total_found=0
-  total_commits="$(grep_commits --pretty=format:%H --grep="${grep}" ${ignore_case} ${perl_regexp} | wc -l | awk '{print $1}')"
-  total_found="$(grep_commits --pretty=format:%B --grep="${grep}" ${ignore_case} ${perl_regexp} \
-    | grep -o "${grep}" ${ignore_case} ${word_regexp} \
+  local total_commits= total_found=
+  total_commits="$(grep_commits "${search}" --pretty=format:%H ${ignore_case} ${perl_regexp} | grep -c '' || true)"
+  total_found="$(grep_commits "${search}" --pretty=format:%B ${ignore_case} ${perl_regexp} \
+    | grep -E -o "${search}" ${ignore_case} ${word_regexp} \
     | wc -l | awk '{print $1}' || true
   )"
 

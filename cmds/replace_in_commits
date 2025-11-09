@@ -20,7 +20,7 @@ Description:
   Perform a search-and-replace in commit messages across the full history.
 
 Arguments:
-  <search>          Pattern to replace in commit messages.
+  <search>          Regexp pattern to replace in commit messages.
   <replacement>     Replacement text.
 
 Options:
@@ -34,6 +34,7 @@ Environment:
 Examples:
   REPO_DIR="\$(pwd)" ${cmd} 'JIRA-' 'TASK-'
   REPO_DIR="\$(pwd)" ${cmd} 'wip' 'WIP' -i -w
+  REPO_DIR="\$(pwd)" ${cmd} 'TODO: (.+)' '@todo \\\\1'
 EOF
 }
 
@@ -44,14 +45,16 @@ main() {
   local replace="$2"
   local ignore_case=
   local word_regexp=
-  local perl_regexp=
-  local grep="${search}"
+  # --perl-regexp must not be used, but for some reason --extended-regexp doesn't work properly
+  # Use --extended-regexp features and DO NOT use --perl-regexp features
+  local perl_regexp="--perl-regexp"
 
   shift 2
   has_flag "-i" "$@" && ignore_case="-i"
-  has_flag "-w" "$@" && word_regexp="--word-regexp" && perl_regexp="--perl-regexp"
+  has_flag "-w" "$@" && word_regexp="--word-regexp"
 
-  [[ -n "${word_regexp}" ]] && grep="$(printf '\\b\\Q%s\\E\\b' "${search}")"
+  # git log doesn't support --word-regexp flag, so we do it ourselves
+  [[ -n "${word_regexp}" ]] && search="$(printf '\\b%s\\b' "${search}")"
 
   local python_flags=
   local python_search="${search}"
@@ -59,7 +62,7 @@ main() {
   [[ -n "${word_regexp}" ]] && python_search="\\b${python_search}\\b"
 
   local python_commits
-  python_commits="$(GIT --no-pager log --pretty=format:%H --color=always --all --grep="${grep}" ${ignore_case} ${perl_regexp} \
+  python_commits="$(GIT --no-pager log --pretty=format:%H --color=always --all --grep="${search}" ${ignore_case} ${perl_regexp} \
     | sed -E 's/^(.+)$/b"\1",/' \
     | paste -sd' ' -
   )"
@@ -73,7 +76,8 @@ commits = { ${python_commits} }
 ${if:-if} commit.original_id not in commits:
     return
 
-commit.message = re.sub(br"${python_search}", b"${replace}", commit.message, ${python_flags})
+decoded = commit.message.decode('utf-8', 'surrogateescape')
+commit.message = re.sub(r"${python_search}", "${replace}", decoded, ${python_flags}).encode('utf-8', 'surrogateescape')
 EOF
 )"
 

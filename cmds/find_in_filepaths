@@ -22,7 +22,7 @@ Description:
   At the end, prints statistics: total matches found.
 
 Arguments:
-  <search>          Literal pattern to find.
+  <search>          Regexp pattern to find.
 
 Options:
   -i                Ignore case.
@@ -35,6 +35,7 @@ Environment:
 Examples:
   REPO_DIR="\$(pwd)" ${cmd} '.env'
   REPO_DIR="\$(pwd)" ${cmd} 'path/to/file' -i -w
+  REPO_DIR="\$(pwd)" ${cmd} '^[a-z]+\$'
 EOF
 }
 
@@ -46,7 +47,7 @@ grep_filepaths() {
   GIT --no-pager log --all --name-only --pretty= \
   | sort \
   | uniq \
-  | grep ${grep_flags} "${search}" || true
+  | grep -E ${grep_flags} "${search}" || true
 }
 
 main() {

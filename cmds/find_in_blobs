@@ -9,7 +9,7 @@ ROOT_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 REPO_DIR="${REPO_DIR:?REPO_DIR is not set}"
 
 OFFSET="---"
-OFFSET_LEN=3
+OFFSET_LEN="${#OFFSET}"
 
 print_help() {
   local cmd="${CMD:-}"
@@ -28,7 +28,7 @@ Description:
   At the end, prints statistics: total files scanned and total matches found.
 
 Arguments:
-  <search>          Literal pattern to find.
+  <search>          Regexp pattern to find.
 
 Options:
   -i                Ignore case.
@@ -44,6 +44,7 @@ Examples:
   REPO_DIR="\$(pwd)" ${cmd} 'SECRET_TOKEN'
   REPO_DIR="\$(pwd)" ${cmd} 'secret_token' -i -w
   REPO_DIR="\$(pwd)" ${cmd} 'TODO' -C=5 -p='*.go' -p='docs/**'
+  REPO_DIR="\$(pwd)" ${cmd} '^[a-z]+\$'
 EOF
 }
 
@@ -54,8 +55,9 @@ grep_commits() {
   shift 2
   local grep_flags="$@"
 
-  # shellcheck disable=SC2046
-  GIT --no-pager grep --no-color -I -l ${grep_flags} -- "${search}" $(GIT rev-list --all) -- ${pathspec} || true
+  # --perl-regexp must not be used, but for some reason --extended-regexp doesn't work properly
+  # Use --extended-regexp features and DO NOT use --perl-regexp features
+  GIT --no-pager grep --no-color -I --name-only --perl-regexp ${grep_flags} -- "${search}" $(GIT rev-list --all) -- ${pathspec} || true
 }
 
 # Produces in format commit<tab>filepath<tab>blob_sha
@@ -97,7 +99,7 @@ match_lines() {
   shift 2
   local grep_flags="$@"
 
-  GIT cat-file -p "${blob_sha}" | grep -n ${grep_flags} "${search}" | cut -d: -f1
+  GIT cat-file -p "${blob_sha}" | grep -E -n ${grep_flags} "${search}" | cut -d: -f1
 }
 
 # Produces set of intersected lines (column format)
@@ -112,7 +114,7 @@ print_lines() {
   local blob_sha="$1"
   local search="$2"
   local lines="$3"
-  local context="$4"
+  local context_num="$4"
   shift 4;
   local grep_flags="$@"
 
@@ -121,16 +123,16 @@ print_lines() {
   echo "${OFFSET} ${blob_sha}"
   echo -n "${lines}" | \
   while read -r line_number || [[ -n "${line_number}" ]]; do
-    start=$((line_number - context))
+    start=$((line_number - context_num))
     [[ "${start}" -le 0 ]] && start=1
-    end=$((line_number + context))
+    end=$((line_number + context_num))
 
     [[ $((i++)) -ge 1 ]] && echo "${OFFSET}"
 
     GIT cat-file -p "${blob_sha}" \
-    | nl -ba -w"${OFFSET_LEN}" -s' ' \
     | sed -n "${start},${end}p" \
-    | grep --color=always ${grep_flags} "${search}"
+    | grep -E --color=always ${grep_flags} "${search}" \
+    | nl -ba -w"${OFFSET_LEN}" -s' ' -v"${start}"
   done
 }
 

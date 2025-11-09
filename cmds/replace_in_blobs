@@ -20,7 +20,7 @@ Description:
   Perform a search-and-replace over blob contents across the full history.
 
 Arguments:
-  <search>          Pattern to replace.
+  <search>          Regexp pattern to replace in blobs.
   <replacement>     Replacement text.
 
 Options:
@@ -36,6 +36,7 @@ Examples:
   REPO_DIR="\$(pwd)" ${cmd} 'SECRET_TOKEN' 'REDACTED_TOKEN'
   REPO_DIR="\$(pwd)" ${cmd} 'secret_token' 'REDACTED_TOKEN' -i -w
   REPO_DIR="\$(pwd)" ${cmd} 'TODO ' 'TODO: ' -p='*.go' -p='docs/**'
+  REPO_DIR="\$(pwd)" ${cmd} '(.+)Name' 'Name\\\\1'
 EOF
 }
 
@@ -46,7 +47,9 @@ grep_commits() {
   shift 2
   local grep_flags="$@"
 
-  GIT --no-pager grep --no-color -I -l ${grep_flags} -- "${search}" $(GIT rev-list --all) -- ${pathspec} || true
+  # --perl-regexp must not be used, but for some reason --extended-regexp doesn't work properly
+  # Use --extended-regexp features and DO NOT use --perl-regexp features
+  GIT --no-pager grep --no-color -I --name-only --perl-regexp ${grep_flags} -- "${search}" $(GIT rev-list --all) -- ${pathspec} || true
 }
 
 # Produces in format blob_sha
@@ -73,14 +76,8 @@ main() {
 
   local python_flags=
   local python_search="${search}"
-  local python_regex=
-  [[ -n "${ignore_case}" ]] && python_flags="flags=re.IGNORECASE" && python_regex='1'
-  [[ -n "${word_regexp}" ]] && python_search="\\b${python_search}\\b" && python_regex='1'
-
-  local python_re_sub="re.sub(br'${python_search}', b'${replace}', blob.data, ${python_flags})"
-  local python_replace="blob.data.replace(b'${search}', b'${replace}')"
-  local python_final_line=
-  [[ -n "${python_regex}" ]] && python_final_line="${python_re_sub}" || python_final_line="${python_replace}"
+  [[ -n "${ignore_case}" ]] && python_flags="flags=re.IGNORECASE"
+  [[ -n "${word_regexp}" ]] && python_search="\\b${python_search}\\b"
 
   local python_blobs
   python_blobs="$(grep_commits "${search}" "${pathspec}" "${ignore_case}" "${word_regexp}" \
@@ -98,7 +95,8 @@ blobs = { ${python_blobs} }
 ${if:-if} blob.original_id not in blobs:
     return
 
-blob.data = ${python_final_line}
+decoded = blob.data.decode('utf-8', 'surrogateescape')
+blob.data = re.sub(r"${python_search}", "${replace}", decoded, ${python_flags}).encode('utf-8', 'surrogateescape')
 EOF
 )"
 
