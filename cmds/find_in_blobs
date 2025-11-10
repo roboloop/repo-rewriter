@@ -129,10 +129,14 @@ print_lines() {
 
     [[ $((i++)) -ge 1 ]] && echo "${OFFSET}"
 
-    GIT cat-file -p "${blob_sha}" \
-    | sed -n "${start},${end}p" \
-    | grep -E --color=always ${grep_flags} "${search}" \
-    | nl -ba -w"${OFFSET_LEN}" -s' ' -v"${start}"
+    local content
+    content="$(GIT cat-file -p "${blob_sha}")"
+    (
+      [[ "${line_number}" -gt "${start}" ]] && sed -n "${start},$((line_number-1))p" <<< "${content}"
+      sed -n "${line_number}p" <<< "${content}" | grep -E --color=always ${grep_flags} "${search}"
+      [[ "${line_number}" -lt "${end}" ]] && sed -n "$((line_number+1)),${end}p" <<< "${content}"
+      return 0
+    ) | nl -ba -w"${OFFSET_LEN}" -s' ' -v"${start}"
   done
 }
 
@@ -143,12 +147,11 @@ main() {
   local ignore_case=
   local word_regexp=
   local context_num=2
-  local context="--context=${context_num}"
   local pathspec=
 
   has_flag "-i" "$@" && ignore_case="--ignore-case"
   has_flag "-w" "$@" && word_regexp="--word-regexp"
-  has_flag "-C" "$@" && context_num="$(flag_value "-C" "$@")" && context="--context=${context_num}"
+  has_flag "-C" "$@" && context_num="$(flag_value "-C" "$@")"
   has_flag "-p" "$@" && pathspec="$(flag_value "-p" "$@" | paste -sd' ' -)"
 
   local prev_commit
@@ -169,7 +172,7 @@ main() {
     lines="$(intersect "${l1}" "${l2}")"
 
     if [[ -n "${lines}" ]]; then
-      print_lines "${blob_sha}" "${search}" "${lines}" "${context_num}" "${ignore_case}" "${word_regexp}" "${context}"
+      print_lines "${blob_sha}" "${search}" "${lines}" "${context_num}" "${ignore_case}" "${word_regexp}"
       found="$(echo "${lines}" | wc -l | awk '{print $1}')"
       total_found=$((total_found + found))
     fi
