@@ -181,6 +181,7 @@ main() {
 
   local commit_filepath_blob=
   commit_filepath_blob="$(grep_commits "${search}" "${pathspec}" "${ignore_case}" "${word_regexp}" | add_blob_sha)"
+  [[ -z "${commit_filepath_blob}" ]] && die "Not found"
 
   while IFS=$'\t' read -r commit filepath blob_sha total; do
     if [[ "${prev_filepath}" != "${filepath}" ]]; then
