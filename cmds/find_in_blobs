@@ -66,13 +66,32 @@ add_blob_sha() {
   | GIT cat-file --batch-check=$'%(rest)\t%(objectname)'
 }
 
-# Produces in format commit<tab>filepath<tab>blob_sha
+# Produces in format oldest_commit<tab>filepath<tab>blob_sha
 group_by_filepath() {
-  cat -n \
-  | sed 's/^[[:space:]]*//' \
+  nl -ba -s $'\t' -w1 \
   | sort -t $'\t' -k3,3 -k1,1nr \
   | cut -d $'\t' -f2- \
   | uniq -f1
+}
+
+# Produces in format count<tab>filepath
+count_by_filepath() {
+  cut -d $'\t' -f2- \
+  | sort -t $'\t' -k1,1 \
+  | uniq \
+  | cut -f1 \
+  | uniq -c \
+  | sed -E 's/^[[:space:]]*([0-9]+)[[:space:]]*/\1\t/'
+}
+
+# Produces in format
+# count1 (new line ˣ count1)
+# count2 (new line ˣ count2)
+expand_with_new_lines() {
+  while read -r total _; do
+    printf '%s' "${total}"
+    seq 1 "${total}" | tr -d '[:digit:]'
+  done
 }
 
 # Produces ranges of hunk lines (column format)
@@ -160,10 +179,13 @@ main() {
   local l1 l2 lines
   local found= total_files=0 total_found=0
 
-  while IFS=$'\t' read -r commit filepath blob_sha; do
+  local commit_filepath_blob=
+  commit_filepath_blob="$(grep_commits "${search}" "${pathspec}" "${ignore_case}" "${word_regexp}" | add_blob_sha)"
+
+  while IFS=$'\t' read -r commit filepath blob_sha total; do
     if [[ "${prev_filepath}" != "${filepath}" ]]; then
        prev_commit="${empty_commit}"
-       echo -e "${OFFSET} \e[30;43m${filepath}\e[0m"
+       echo -e "${OFFSET} \e[30;43m${filepath}\e[0m (actual blobs: ${total})"
        : $((++total_files))
     fi
 
@@ -179,9 +201,10 @@ main() {
 
     prev_commit="${commit}"
     prev_filepath="${filepath}"
-    done < <(grep_commits "${search}" "${pathspec}" "${ignore_case}" "${word_regexp}" \
-      | add_blob_sha \
-      | group_by_filepath)
+    done < <(paste -d $'\t' \
+      <(group_by_filepath <<< "${commit_filepath_blob}") \
+      <(count_by_filepath <<< "${commit_filepath_blob}" | expand_with_new_lines) \
+    )
 
     # Calculate stats
     echo "Total files: ${total_files}"
